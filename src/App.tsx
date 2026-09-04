@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Role, QuickMessageType, ServiceTemplate } from './types/hub';
+import { Role, QuickMessageType, ServiceTemplate, ClassId } from './types/hub';
 import { useServiceSync } from './hooks/useServiceSync';
 import { Navbar } from './components/Navbar';
+import { AllClassesOverview } from './components/AllClassesOverview';
 import { CommsDashboard } from './components/CommsDashboard';
 import { TechConsole } from './components/TechConsole';
 import { PresenterMode } from './components/PresenterMode';
@@ -21,7 +22,8 @@ import {
   Flame, 
   CheckCircle2, 
   X,
-  Volume2
+  Volume2,
+  Globe
 } from 'lucide-react';
 
 export default function App() {
@@ -30,6 +32,7 @@ export default function App() {
   const [isHolySpiritModalOpen, setIsHolySpiritModalOpen] = useState<boolean>(false);
   const [isMobileSimulatorOpen, setIsMobileSimulatorOpen] = useState<boolean>(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+  const [authModalInitialTab, setAuthModalInitialTab] = useState<'quick_switch' | 'login' | 'register' | 'manage' | 'permissions'>('quick_switch');
 
   const {
     authUser,
@@ -74,6 +77,16 @@ export default function App() {
     sendNotification,
     addPrayerRequest,
     updateReview,
+    selectedClassId,
+    switchClassHub,
+    activeClassInfo,
+    allClassesConfig,
+    allClassHubs,
+    registeredAccounts,
+    addNewAccount,
+    deleteUserAccount,
+    broadcastCueToAllClasses,
+    sendCueToClass,
   } = useServiceSync(activeRole);
 
   const handleRoleChange = (newRole: Role) => {
@@ -84,9 +97,9 @@ export default function App() {
     else if (newRole === 'admin') setActiveTab('templates');
   };
 
-  const handleApplyTemplate = (template: ServiceTemplate) => {
-    applyTemplateToLiveService(template);
-    setActiveTab('comms');
+  const handleOpenAuthModal = (tab?: 'quick_switch' | 'login' | 'register' | 'manage' | 'permissions') => {
+    setAuthModalInitialTab(tab || 'quick_switch');
+    setIsAuthModalOpen(true);
   };
 
   return (
@@ -98,7 +111,7 @@ export default function App() {
         onResolve={resolveIncident}
       />
 
-      {/* Top Main Navigation Bar */}
+      {/* Top Main Navigation Bar with Interactive Class Switcher */}
       <Navbar
         activeRole={activeRole}
         setActiveRole={handleRoleChange}
@@ -116,7 +129,10 @@ export default function App() {
         setActiveTab={setActiveTab}
         currentSegment={currentSegment}
         currentUser={authUser}
-        onOpenAuthModal={() => setIsAuthModalOpen(true)}
+        onOpenAuthModal={handleOpenAuthModal}
+        selectedClassId={selectedClassId}
+        onSelectClass={switchClassHub}
+        allClasses={allClassesConfig}
       />
 
       {/* Emergency Active Warning Banner */}
@@ -137,8 +153,70 @@ export default function App() {
         </div>
       )}
 
+      {/* Active Class Ribbon (when on an individual class hub) */}
+      {selectedClassId !== 'all' && activeTab !== 'all-classes' && activeClassInfo && (
+        <div className="bg-[#121222] border-b border-white/5 px-4 py-2">
+          <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2.5">
+              <span className={`w-3 h-3 rounded-full ${
+                selectedClassId === 'jy' ? 'bg-blue-400' :
+                selectedClassId === 'tb' ? 'bg-pink-400' :
+                selectedClassId === 'kb' ? 'bg-red-400' :
+                selectedClassId === 'la-orange' ? 'bg-orange-400' : 'bg-yellow-400'
+              }`}></span>
+              <span className="font-extrabold text-white text-sm">
+                {activeClassInfo.name} Hub
+              </span>
+              <span className="text-gray-400">({activeClassInfo.colorName} Class • {activeClassInfo.grade})</span>
+              <span className="text-purple-300/80 font-mono bg-white/5 px-2 py-0.5 rounded-md border border-white/5">
+                {activeClassInfo.room}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-3 text-gray-400 text-[11px]">
+              <span>Lead: <strong className="text-white">{activeClassInfo.defaultLead}</strong></span>
+              <span>•</span>
+              <span>Capacity: <strong className="text-white">{activeClassInfo.capacity} kids</strong></span>
+              <button
+                onClick={() => {
+                  switchClassHub('all');
+                  setActiveTab('all-classes');
+                }}
+                className="text-purple-400 hover:text-purple-300 font-bold underline ml-1"
+              >
+                Switch to All Classes View &rarr;
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
+        {/* TAB 0: Master All-Classes Command Center */}
+        {activeTab === 'all-classes' && (
+          <AllClassesOverview
+            allClassHubs={allClassHubs}
+            hubsData={allClassHubs}
+            classes={allClassesConfig}
+            selectedClassId={selectedClassId}
+            onSelectClass={(classId: ClassId) => {
+              switchClassHub(classId);
+            }}
+            onOpenClassTab={(classId: ClassId, tab: 'comms' | 'tech' | 'presenter') => {
+              switchClassHub(classId);
+              setActiveTab(tab);
+            }}
+            onBroadcastGlobalCue={broadcastCueToAllClasses}
+            onBroadcastAll={broadcastCueToAllClasses}
+            onSendClassCue={sendCueToClass}
+            onSendCueToClass={sendCueToClass}
+            currentUser={authUser}
+            onOpenAuthModal={() => handleOpenAuthModal('register')}
+          />
+        )}
+
+        {/* TAB 1: Comms Dashboard for Selected Class Hub */}
         {activeTab === 'comms' && (
           <CommsDashboard
             segments={segments}
@@ -155,6 +233,7 @@ export default function App() {
           />
         )}
 
+        {/* TAB 2: Tech Console for Selected Class Hub */}
         {activeTab === 'tech' && (
           <TechConsole
             checklist={checklist}
@@ -178,6 +257,7 @@ export default function App() {
           />
         )}
 
+        {/* TAB 3: Presenter HUD for Selected Class Hub */}
         {activeTab === 'presenter' && (
           <PresenterMode
             currentSegment={currentSegment}
@@ -190,6 +270,7 @@ export default function App() {
           />
         )}
 
+        {/* TAB 4: Team & Resources (with account registration & class roster) */}
         {activeTab === 'team' && (
           <TeamResources
             teamMembers={teamMembers}
@@ -197,9 +278,14 @@ export default function App() {
             incidents={incidents}
             onAddIncident={addIncident}
             onResolveIncident={resolveIncident}
+            selectedClassId={selectedClassId}
+            activeClassInfo={activeClassInfo}
+            registeredAccounts={registeredAccounts}
+            onOpenAuthModal={handleOpenAuthModal}
           />
         )}
 
+        {/* TAB 5: Planner & Review */}
         {activeTab === 'planner' && (
           <PlannerReview
             reviewData={reviewData}
@@ -209,6 +295,7 @@ export default function App() {
           />
         )}
 
+        {/* TAB 6: Service Templates Editor */}
         {activeTab === 'templates' && (
           <ServiceTemplateEditor
             currentUser={authUser}
@@ -221,7 +308,7 @@ export default function App() {
               applyTemplateToLiveService(tmplId);
               setActiveTab('comms');
             }}
-            onOpenAuthModal={() => setIsAuthModalOpen(true)}
+            onOpenAuthModal={() => handleOpenAuthModal('permissions')}
           />
         )}
       </main>
@@ -245,6 +332,7 @@ export default function App() {
         onOpenHolySpiritModal={() => setIsHolySpiritModalOpen(true)}
       />
 
+      {/* Multi-Account & Class Assignment Auth Modal */}
       <AuthModal
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
@@ -252,6 +340,10 @@ export default function App() {
         onLogin={loginUser}
         onSwitchUser={switchAuthUser}
         onLogout={logoutUser}
+        registeredAccounts={registeredAccounts}
+        onAddNewAccount={addNewAccount}
+        onDeleteAccount={deleteUserAccount}
+        initialTab={authModalInitialTab}
       />
 
       {/* Footer Status Bar */}
@@ -259,17 +351,21 @@ export default function App() {
         <div className="flex items-center gap-4 py-1">
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-            <span className="text-[10px] font-bold tracking-widest uppercase opacity-80 text-white">Live Service Sync Active</span>
+            <span className="text-[10px] font-bold tracking-widest uppercase opacity-80 text-white">5-Class Multi-Room Network Active</span>
           </div>
           <span className="hidden sm:inline text-white/20">|</span>
           <div className="hidden sm:flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-green-500"></span>
-            <span className="text-[10px] font-mono uppercase opacity-60">Main Stage Mic: Hot</span>
+            <span className="text-[10px] font-mono uppercase opacity-60">
+              Active: {selectedClassId === 'all' ? 'All Classes' : activeClassInfo?.name}
+            </span>
           </div>
           <span className="hidden md:inline text-white/20">|</span>
           <div className="hidden md:flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-            <span className="text-[10px] font-mono uppercase opacity-60">Battery: Lapel A (78%)</span>
+            <span className="text-[10px] font-mono uppercase opacity-60">
+              User: {authUser.name} ({authUser.assignedClassId === 'all' ? 'Director' : authUser.assignedClassId?.toUpperCase()})
+            </span>
           </div>
         </div>
 

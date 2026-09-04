@@ -1,5 +1,24 @@
 export type Role = 'admin' | 'comms' | 'tech' | 'presenter';
 
+export type ClassId = 'jy' | 'tb' | 'kb' | 'la-orange' | 'la-yellow' | 'all';
+
+export interface ClassInfo {
+  id: ClassId;
+  name: string;
+  shortCode: string;
+  colorName: string;
+  colorHex: string;
+  grade: string;
+  ageGroup: string;
+  room: string;
+  themeBadge: string;
+  accentBorder: string;
+  accentBg: string;
+  accentText: string;
+  pillBadge: string;
+  description: string;
+}
+
 export type SegmentStatus = 'completed' | 'in_progress' | 'upcoming';
 
 export interface ServiceSegment {
@@ -169,9 +188,24 @@ export interface AuthUser {
   name: string;
   role: Role;
   roleTitle: string;
+  assignedClassId: ClassId;
   avatarColor: string;
   phone?: string;
   isAuthenticated: boolean;
+}
+
+export interface ClassHubData {
+  classId: ClassId;
+  serviceState: ServiceState;
+  segments: ServiceSegment[];
+  checklist: PreServiceCheckItem[];
+  worshipQueue: WorshipSong[];
+  activeCues: StageCueBroadcast[];
+  incidents: IncidentLog[];
+  lessonNotes: LessonNotesData;
+  teamMembers: TeamMember[];
+  reviewData: ServiceReviewData;
+  prayerRequests: PrayerRequest[];
 }
 
 export interface ServiceTemplateSegment {

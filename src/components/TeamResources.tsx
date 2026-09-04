@@ -11,9 +11,11 @@ import {
   Sparkles,
   Gamepad2,
   FileText,
-  X
+  X,
+  UserPlus,
+  Globe
 } from 'lucide-react';
-import { TeamMember, LessonNotesData, IncidentLog } from '../types/hub';
+import { TeamMember, LessonNotesData, IncidentLog, ClassId, ClassInfo, AuthUser } from '../types/hub';
 
 interface TeamResourcesProps {
   teamMembers: TeamMember[];
@@ -21,6 +23,10 @@ interface TeamResourcesProps {
   incidents: IncidentLog[];
   onAddIncident: (description: string, severity: 'low' | 'medium' | 'critical') => void;
   onResolveIncident: (id: string) => void;
+  selectedClassId?: ClassId;
+  activeClassInfo?: ClassInfo;
+  registeredAccounts?: AuthUser[];
+  onOpenAuthModal?: (tab?: 'quick_switch' | 'login' | 'register' | 'manage') => void;
 }
 
 export const TeamResources: React.FC<TeamResourcesProps> = ({
@@ -29,10 +35,15 @@ export const TeamResources: React.FC<TeamResourcesProps> = ({
   incidents,
   onAddIncident,
   onResolveIncident,
+  selectedClassId,
+  activeClassInfo,
+  registeredAccounts = [],
+  onOpenAuthModal,
 }) => {
   const [showIncidentModal, setShowIncidentModal] = useState(false);
   const [incidentText, setIncidentText] = useState('');
   const [incidentSeverity, setIncidentSeverity] = useState<'low' | 'medium' | 'critical'>('low');
+  const [rosterFilter, setRosterFilter] = useState<'class' | 'all'>('class');
 
   const handleCreateIncident = (e: React.FormEvent) => {
     e.preventDefault();
@@ -74,7 +85,7 @@ export const TeamResources: React.FC<TeamResourcesProps> = ({
       {/* 3-Column Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
-        {/* Card 1: Team Roster */}
+        {/* Card 1: Team Roster & Volunteer Accounts */}
         <div className="bg-[#161626] rounded-2xl border border-white/5 p-5 shadow-xl space-y-4">
           <div className="flex items-center justify-between pb-3 border-b border-white/5">
             <div>
@@ -84,41 +95,109 @@ export const TeamResources: React.FC<TeamResourcesProps> = ({
                 <span>Team Roster</span>
               </h3>
             </div>
-            <span className="text-[11px] font-mono text-purple-300 bg-black/40 px-2 py-0.5 rounded-lg border border-white/10">{teamMembers.length} Active</span>
+            
+            {onOpenAuthModal && (
+              <button
+                onClick={() => onOpenAuthModal('register')}
+                className="px-2.5 py-1 rounded-xl bg-purple-600/30 hover:bg-purple-600 border border-purple-500/40 text-purple-200 hover:text-white text-[11px] font-bold flex items-center gap-1 transition-all"
+                title="Create a new login account & assign to a class"
+              >
+                <UserPlus className="w-3 h-3" />
+                <span>+ Register</span>
+              </button>
+            )}
           </div>
 
-          <div className="space-y-2.5">
-            {teamMembers.map((member) => (
-              <div
-                key={member.id}
-                className="p-3 rounded-xl bg-white/5 border border-white/5 flex items-center justify-between transition-all hover:border-purple-500/40"
-              >
-                <div className="flex items-center gap-3">
-                  <div className={`w-8 h-8 rounded-xl bg-gradient-to-br ${member.avatarColor} flex items-center justify-center text-white font-bold text-xs shadow-md`}>
-                    {member.name.substring(0, 2).toUpperCase()}
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
-                      <span>{member.name}</span>
-                      {member.isOnline && (
-                        <span className="w-1.5 h-1.5 rounded-full bg-green-400"></span>
-                      )}
-                    </h4>
-                    <p className="text-[11px] text-gray-400">{member.roleTitle}</p>
-                  </div>
-                </div>
+          {/* Roster Filter Tabs */}
+          <div className="flex items-center gap-1 bg-black/40 p-1 rounded-xl border border-white/5 text-[11px]">
+            <button
+              onClick={() => setRosterFilter('class')}
+              className={`flex-1 py-1 px-2 rounded-lg font-bold transition-all text-center ${
+                rosterFilter === 'class' ? 'bg-purple-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              {activeClassInfo ? activeClassInfo.name : 'Class Team'}
+            </button>
+            <button
+              onClick={() => setRosterFilter('all')}
+              className={`flex-1 py-1 px-2 rounded-lg font-bold transition-all text-center ${
+                rosterFilter === 'all' ? 'bg-purple-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              All Registered ({registeredAccounts.length})
+            </button>
+          </div>
 
-                {member.phone && (
-                  <a
-                    href={`tel:${member.phone}`}
-                    className="p-1.5 rounded-lg bg-black/40 hover:bg-purple-600/30 text-gray-300 hover:text-purple-300 transition-colors"
-                    title={`Call ${member.name}`}
+          <div className="space-y-2.5 max-h-[360px] overflow-y-auto pr-1">
+            {rosterFilter === 'class' ? (
+              teamMembers.map((member) => (
+                <div
+                  key={member.id}
+                  className="p-3 rounded-xl bg-white/5 border border-white/5 flex items-center justify-between transition-all hover:border-purple-500/40"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`w-8 h-8 rounded-xl bg-gradient-to-br ${member.avatarColor} flex items-center justify-center text-white font-bold text-xs shadow-md shrink-0`}>
+                      {member.name.substring(0, 2).toUpperCase()}
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
+                        <span>{member.name}</span>
+                        {member.isOnline && (
+                          <span className="w-1.5 h-1.5 rounded-full bg-green-400"></span>
+                        )}
+                      </h4>
+                      <p className="text-[11px] text-gray-400">{member.roleTitle}</p>
+                    </div>
+                  </div>
+
+                  {member.phone && (
+                    <a
+                      href={`tel:${member.phone}`}
+                      className="p-1.5 rounded-lg bg-black/40 hover:bg-purple-600/30 text-gray-300 hover:text-purple-300 transition-colors shrink-0"
+                      title={`Call ${member.name}`}
+                    >
+                      <Phone className="w-3.5 h-3.5" />
+                    </a>
+                  )}
+                </div>
+              ))
+            ) : (
+              registeredAccounts.map((account) => {
+                const classBadge = 
+                  account.assignedClassId === 'jy' ? 'bg-blue-500/20 text-blue-300 border-blue-500/40' :
+                  account.assignedClassId === 'tb' ? 'bg-pink-500/20 text-pink-300 border-pink-500/40' :
+                  account.assignedClassId === 'kb' ? 'bg-red-500/20 text-red-300 border-red-500/40' :
+                  account.assignedClassId === 'la-orange' ? 'bg-orange-500/20 text-orange-300 border-orange-500/40' :
+                  account.assignedClassId === 'la-yellow' ? 'bg-yellow-500/20 text-yellow-300 border-yellow-500/40' :
+                  'bg-purple-500/20 text-purple-300 border-purple-500/40';
+
+                return (
+                  <div
+                    key={account.id}
+                    className="p-2.5 rounded-xl bg-white/5 border border-white/5 flex items-center justify-between transition-all hover:border-purple-500/40"
                   >
-                    <Phone className="w-3.5 h-3.5" />
-                  </a>
-                )}
-              </div>
-            ))}
+                    <div className="flex items-center gap-2.5">
+                      <div className={`w-8 h-8 rounded-xl bg-gradient-to-br ${account.avatarColor} flex items-center justify-center text-white font-bold text-xs shadow-md shrink-0`}>
+                        {account.name.substring(0, 2).toUpperCase()}
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                          <span>{account.name}</span>
+                          <span className={`text-[8px] uppercase px-1 py-0.2 rounded border font-mono font-bold ${classBadge}`}>
+                            {account.assignedClassId === 'all' ? 'All' : account.assignedClassId?.toUpperCase()}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-gray-400 flex items-center gap-1">
+                          <span>{account.roleTitle || account.role}</span>
+                          <span>•</span>
+                          <span className="font-mono truncate max-w-[100px]">{account.email}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
 

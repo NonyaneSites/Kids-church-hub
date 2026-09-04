@@ -45,41 +45,114 @@ export const PRECONFIGURED_USERS: AuthUser[] = [
     name: 'Pastor Hope',
     role: 'admin',
     roleTitle: 'Kids Ministry Director / Admin',
+    assignedClassId: 'all',
     avatarColor: 'from-amber-500 to-orange-600',
     phone: '+1 (555) 019-2834',
     isAuthenticated: true,
   },
   {
-    id: 'usr-tech-1',
+    id: 'usr-tech-jy',
     email: 'tech@crc.church',
     name: 'Thabo',
     role: 'tech',
-    roleTitle: 'Tech & Systems Master',
+    roleTitle: 'Junior Youth Tech Lead',
+    assignedClassId: 'jy',
     avatarColor: 'from-blue-500 to-cyan-600',
     phone: '+1 (555) 019-5512',
     isAuthenticated: true,
   },
   {
-    id: 'usr-presenter-1',
+    id: 'usr-presenter-kb',
     email: 'presenter@crc.church',
     name: 'Lebo',
     role: 'presenter',
-    roleTitle: 'Lead Lesson Presenter',
+    roleTitle: 'Kingdom Builders Presenter',
+    assignedClassId: 'kb',
     avatarColor: 'from-purple-500 to-indigo-600',
     phone: '+1 (555) 019-8821',
     isAuthenticated: true,
   },
   {
-    id: 'usr-comms-1',
+    id: 'usr-comms-tb',
     email: 'comms@crc.church',
     name: 'Nomsa',
     role: 'comms',
-    roleTitle: 'Communications Lead',
-    avatarColor: 'from-emerald-500 to-teal-600',
+    roleTitle: 'TRAILBLAZERS Comms Lead',
+    assignedClassId: 'tb',
+    avatarColor: 'from-pink-500 to-rose-600',
     phone: '+1 (555) 019-4490',
     isAuthenticated: true,
   },
+  {
+    id: 'usr-orange-lead',
+    email: 'grace@crc.church',
+    name: 'Aunty Grace',
+    role: 'presenter',
+    roleTitle: 'Little Adventures Orange Storyteller',
+    assignedClassId: 'la-orange',
+    avatarColor: 'from-orange-500 to-amber-600',
+    phone: '+1 (555) 019-7711',
+    isAuthenticated: true,
+  },
+  {
+    id: 'usr-yellow-lead',
+    email: 'david@crc.church',
+    name: 'Uncle David',
+    role: 'tech',
+    roleTitle: 'Little Adventures Yellow Music & Tech',
+    assignedClassId: 'la-yellow',
+    avatarColor: 'from-yellow-500 to-amber-600',
+    phone: '+1 (555) 019-3329',
+    isAuthenticated: true,
+  },
 ];
+
+const LOCAL_USERS_STORAGE_KEY = 'kids_church_registered_users_v2';
+
+export function getStoredAccountsList(): AuthUser[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_USERS_STORAGE_KEY);
+    if (!raw) return PRECONFIGURED_USERS;
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      // Merge preconfigured users if not present
+      const combined = [...parsed];
+      for (const pre of PRECONFIGURED_USERS) {
+        if (!combined.some(u => u.email === pre.email || u.id === pre.id)) {
+          combined.push(pre);
+        }
+      }
+      return combined;
+    }
+  } catch (e) {
+    console.warn('Error reading stored accounts:', e);
+  }
+  return PRECONFIGURED_USERS;
+}
+
+export function saveNewAccount(newUser: AuthUser): AuthUser[] {
+  try {
+    const list = getStoredAccountsList();
+    const updated = [newUser, ...list.filter(u => u.id !== newUser.id && u.email !== newUser.email)];
+    localStorage.setItem(LOCAL_USERS_STORAGE_KEY, JSON.stringify(updated));
+    return updated;
+  } catch (e) {
+    console.error('Failed to save account:', e);
+    return getStoredAccountsList();
+  }
+}
+
+export function deleteAccount(userId: string): AuthUser[] {
+  try {
+    const list = getStoredAccountsList();
+    const updated = list.filter(u => u.id !== userId);
+    localStorage.setItem(LOCAL_USERS_STORAGE_KEY, JSON.stringify(updated));
+    return updated;
+  } catch (e) {
+    console.error('Failed to delete account:', e);
+    return getStoredAccountsList();
+  }
+}
 
 // -------------------------------------------------------------
 // DEFAULT SERVICE TEMPLATES (POSTGRES `service_templates` TABLE)
@@ -316,7 +389,10 @@ export function getStoredAuthUser(): AuthUser {
     if (saved) {
       const parsed = JSON.parse(saved);
       if (parsed && parsed.email && parsed.role) {
-        return parsed;
+        return {
+          ...parsed,
+          assignedClassId: parsed.assignedClassId || 'all',
+        };
       }
     }
   } catch (e) {

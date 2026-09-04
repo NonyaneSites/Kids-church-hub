@@ -20,6 +20,9 @@ import {
   ServiceTemplate,
   ServiceTemplateSegment,
   RealtimeIncidentEvent,
+  ClassId,
+  ClassInfo,
+  ClassHubData,
 } from '../types/hub';
 import {
   getStoredAuthUser,
@@ -30,7 +33,11 @@ import {
   broadcastIncidentRealtime,
   PRECONFIGURED_USERS,
   DEFAULT_SERVICE_TEMPLATES,
+  getStoredAccountsList,
+  saveNewAccount,
+  deleteAccount,
 } from '../lib/supabase';
+import { CLASSES_CONFIG, getAllDefaultClassHubs } from '../data/classHubsData';
 
 // Seed initial service segments based on mockup
 const INITIAL_SEGMENTS: ServiceSegment[] = [
@@ -216,35 +223,119 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
   // Authentication & Role State
   const [authUser, setAuthUser] = useState<AuthUser>(() => getStoredAuthUser());
 
-  // Service State
-  const [serviceState, setServiceState] = useState<ServiceState>(() => {
-    return {
-      serviceId: 'srv-dreamweek-day3',
-      serviceName: 'Dream Week Conference CRC',
-      date: 'Wed, June 18, 2026',
-      theme: 'Bigger Together',
-      currentSegmentId: 'seg-3', // Memory Verse
-      targetEndTime: getMockInitialEndTime(),
-      targetDurationSeconds: 15 * 60,
-      isPaused: false,
-      lastUpdated: new Date().toISOString(),
-      currentSlideIndex: 14,
-      totalSlides: 23,
-      activeWorshipSongId: 'song-2',
-      isEmergencyActive: false,
-      activeEmergencyType: null,
-    };
+  // Registered Accounts State (Supabase / Local DB)
+  const [registeredAccounts, setRegisteredAccounts] = useState<AuthUser[]>(() => getStoredAccountsList());
+
+  // Multi-Class Hubs Master State
+  const [allClassHubs, setAllClassHubs] = useState<Record<ClassId, ClassHubData>>(() => {
+    try {
+      const saved = localStorage.getItem('kids_church_multi_class_hubs_v2');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.jy && parsed.tb && parsed.kb && parsed['la-orange'] && parsed['la-yellow']) {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.warn('Error loading class hubs:', e);
+    }
+    return getAllDefaultClassHubs();
   });
 
-  const [segments, setSegments] = useState<ServiceSegment[]>(INITIAL_SEGMENTS);
-  const [checklist, setChecklist] = useState<PreServiceCheckItem[]>(INITIAL_CHECKLIST);
-  const [worshipQueue, setWorshipQueue] = useState<WorshipSong[]>(INITIAL_WORSHIP_QUEUE);
-  const [activeCues, setActiveCues] = useState<StageCueBroadcast[]>([]);
-  const [incidents, setIncidents] = useState<IncidentLog[]>(INITIAL_INCIDENTS);
-  const [teamMembers] = useState<TeamMember[]>(INITIAL_TEAM);
-  const [lessonNotes, setLessonNotes] = useState<LessonNotesData>(INITIAL_LESSON);
-  const [reviewData, setReviewData] = useState<ServiceReviewData>(INITIAL_REVIEW);
-  const [prayerRequests, setPrayerRequests] = useState<PrayerRequest[]>(INITIAL_PRAYERS);
+  // Selected Active Class Hub
+  const [selectedClassId, setSelectedClassId] = useState<ClassId>(() => {
+    try {
+      const saved = localStorage.getItem('kch_selected_class_id');
+      if (saved && ['jy', 'tb', 'kb', 'la-orange', 'la-yellow', 'all'].includes(saved)) {
+        return saved as ClassId;
+      }
+    } catch (e) {}
+    const auth = getStoredAuthUser();
+    if (auth.assignedClassId && auth.assignedClassId !== 'all') {
+      return auth.assignedClassId;
+    }
+    return 'kb';
+  });
+
+  const activeHubKey: ClassId = selectedClassId === 'all' ? 'kb' : selectedClassId;
+  const initialHubData = allClassHubs[activeHubKey] || allClassHubs.kb;
+
+  // Active Service State for the current room
+  const [serviceState, setServiceState] = useState<ServiceState>(() => initialHubData?.serviceState || {
+    serviceId: 'srv-dreamweek-day3',
+    serviceName: 'Dream Week Conference CRC',
+    date: 'Wed, June 18, 2026',
+    theme: 'Bigger Together',
+    currentSegmentId: 'seg-3',
+    targetEndTime: getMockInitialEndTime(),
+    targetDurationSeconds: 15 * 60,
+    isPaused: false,
+    lastUpdated: new Date().toISOString(),
+    currentSlideIndex: 14,
+    totalSlides: 23,
+    activeWorshipSongId: 'song-2',
+    isEmergencyActive: false,
+    activeEmergencyType: null,
+  });
+
+  const [segments, setSegments] = useState<ServiceSegment[]>(() => initialHubData?.segments || INITIAL_SEGMENTS);
+  const [checklist, setChecklist] = useState<PreServiceCheckItem[]>(() => initialHubData?.checklist || INITIAL_CHECKLIST);
+  const [worshipQueue, setWorshipQueue] = useState<WorshipSong[]>(() => initialHubData?.worshipQueue || INITIAL_WORSHIP_QUEUE);
+  const [activeCues, setActiveCues] = useState<StageCueBroadcast[]>(() => initialHubData?.activeCues || []);
+  const [incidents, setIncidents] = useState<IncidentLog[]>(() => initialHubData?.incidents || INITIAL_INCIDENTS);
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>(() => initialHubData?.teamMembers || INITIAL_TEAM);
+  const [lessonNotes, setLessonNotes] = useState<LessonNotesData>(() => initialHubData?.lessonNotes || INITIAL_LESSON);
+  const [reviewData, setReviewData] = useState<ServiceReviewData>(() => initialHubData?.reviewData || INITIAL_REVIEW);
+  const [prayerRequests, setPrayerRequests] = useState<PrayerRequest[]>(() => initialHubData?.prayerRequests || INITIAL_PRAYERS);
+
+  // Active class configuration helper
+  const activeClassInfo = useMemo(() => {
+    return CLASSES_CONFIG.find((c) => c.id === selectedClassId) || CLASSES_CONFIG.find((c) => c.id === 'kb') || CLASSES_CONFIG[0];
+  }, [selectedClassId]);
+
+  // Keep allClassHubs in sync with active room changes and persist to localStorage
+  useEffect(() => {
+    const hubKey = selectedClassId === 'all' ? 'kb' : selectedClassId;
+    setAllClassHubs((prev) => {
+      const existing = prev[hubKey];
+      if (!existing) return prev;
+      const updatedHub: ClassHubData = {
+        ...existing,
+        serviceState,
+        segments,
+        checklist,
+        worshipQueue,
+        activeCues,
+        incidents,
+        teamMembers,
+        lessonNotes,
+        reviewData,
+        prayerRequests,
+      };
+      const updatedAll = {
+        ...prev,
+        [hubKey]: updatedHub,
+      };
+      try {
+        localStorage.setItem('kids_church_multi_class_hubs_v2', JSON.stringify(updatedAll));
+      } catch (e) {
+        console.warn('Error persisting class hubs:', e);
+      }
+      return updatedAll;
+    });
+  }, [
+    selectedClassId,
+    serviceState,
+    segments,
+    checklist,
+    worshipQueue,
+    activeCues,
+    incidents,
+    teamMembers,
+    lessonNotes,
+    reviewData,
+    prayerRequests,
+  ]);
 
   // Service Templates Table State (Postgres `service_templates`)
   const [serviceTemplates, setServiceTemplates] = useState<ServiceTemplate[]>(() => getStoredTemplates());
@@ -797,25 +888,67 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
     [segments, startSegment]
   );
 
-  // Auth User Management
-  const loginUser = useCallback((email: string, role?: Role, name?: string) => {
-    const existing = PRECONFIGURED_USERS.find((u) => u.email.toLowerCase() === email.toLowerCase()) || {
+  // Switch between Class Hubs
+  const switchClassHub = useCallback((newClassId: ClassId) => {
+    setSelectedClassId(newClassId);
+    try {
+      localStorage.setItem('kch_selected_class_id', newClassId);
+    } catch (e) {}
+
+    const targetKey = newClassId === 'all' ? 'kb' : newClassId;
+    const targetHub = allClassHubs[targetKey] || allClassHubs.kb;
+    if (targetHub) {
+      setServiceState(targetHub.serviceState);
+      setSegments(targetHub.segments);
+      setChecklist(targetHub.checklist);
+      setWorshipQueue(targetHub.worshipQueue);
+      setActiveCues(targetHub.activeCues || []);
+      setIncidents(targetHub.incidents || []);
+      setTeamMembers(targetHub.teamMembers || INITIAL_TEAM);
+      setLessonNotes(targetHub.lessonNotes);
+      setReviewData(targetHub.reviewData);
+      setPrayerRequests(targetHub.prayerRequests);
+    }
+  }, [allClassHubs]);
+
+  // Auth User Management & Account Registration
+  const loginUser = useCallback((email: string, role?: Role, name?: string, classId?: ClassId) => {
+    const existing = registeredAccounts.find((u) => u.email.toLowerCase() === email.toLowerCase()) || {
       id: `usr_${Date.now()}`,
       email,
       name: name || email.split('@')[0],
       role: role || 'admin',
       roleTitle: role === 'admin' ? 'Administrator' : role === 'tech' ? 'Tech & Systems' : role === 'presenter' ? 'Lesson Presenter' : 'Comms Lead',
+      assignedClassId: classId || 'all',
       avatarColor: role === 'admin' ? 'from-amber-500 to-orange-600' : role === 'tech' ? 'from-blue-500 to-cyan-600' : role === 'presenter' ? 'from-purple-500 to-indigo-600' : 'from-emerald-500 to-teal-600',
       isAuthenticated: true,
     };
     setAuthUser(existing);
     saveStoredAuthUser(existing);
+    if (existing.assignedClassId && existing.assignedClassId !== 'all') {
+      switchClassHub(existing.assignedClassId);
+    }
     return existing;
-  }, []);
+  }, [registeredAccounts, switchClassHub]);
 
   const switchAuthUser = useCallback((user: AuthUser) => {
     setAuthUser(user);
     saveStoredAuthUser(user);
+    if (user.assignedClassId && user.assignedClassId !== 'all') {
+      switchClassHub(user.assignedClassId);
+    }
+  }, [switchClassHub]);
+
+  const addNewAccount = useCallback((newUser: AuthUser) => {
+    const updated = saveNewAccount(newUser);
+    setRegisteredAccounts(updated);
+    return updated;
+  }, []);
+
+  const deleteUserAccount = useCallback((userId: string) => {
+    const updated = deleteAccount(userId);
+    setRegisteredAccounts(updated);
+    return updated;
   }, []);
 
   const logoutUser = useCallback(() => {
@@ -825,12 +958,90 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
       name: 'Guest',
       role: 'presenter',
       roleTitle: 'Viewer',
+      assignedClassId: 'all',
       avatarColor: 'from-gray-600 to-gray-800',
       isAuthenticated: false,
     };
     setAuthUser(guestUser);
     saveStoredAuthUser(guestUser);
   }, []);
+
+  // Multi-Class Broadcast Helpers
+  const broadcastCueToAllClasses = useCallback((title: string, message: string, priority: 'normal' | 'urgent' | 'emergency' = 'normal') => {
+    const newCue: StageCueBroadcast = {
+      id: `cue_global_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      type: 'custom',
+      title,
+      message,
+      senderRole: activeRole,
+      senderName: authUser.name || 'Central Command',
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      priority,
+      expiresAt: new Date(Date.now() + 25000).toISOString(),
+    };
+    setActiveCues((prev) => [newCue, ...prev]);
+    playCueSound(priority);
+    dispatchBroadcast('STAGE_CUE', newCue);
+
+    setAllClassHubs((prev) => {
+      const updated = { ...prev };
+      (Object.keys(updated) as ClassId[]).forEach((cid) => {
+        updated[cid] = {
+          ...updated[cid],
+          activeCues: [newCue, ...(updated[cid].activeCues || [])],
+        };
+      });
+      try {
+        localStorage.setItem('kids_church_multi_class_hubs_v2', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+  }, [activeRole, authUser.name, dispatchBroadcast, playCueSound]);
+
+  const sendCueToClass = useCallback((classId: ClassId, type: QuickMessageType, customMessage?: string) => {
+    const titles: Record<QuickMessageType, string> = {
+      wrap_up: 'Wrap Up',
+      slow_down: 'Slow Down',
+      speed_up: 'Speed Up',
+      mic_closer: 'Mic Closer',
+      pray: 'Pray / Response',
+      finish: 'Finish Segment',
+      custom: 'Stage Cue',
+    };
+    const newCue: StageCueBroadcast = {
+      id: `cue_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      type,
+      title: titles[type] || 'Stage Cue',
+      message: customMessage || 'Notice from control booth',
+      senderRole: activeRole,
+      senderName: authUser.name || 'Booth',
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      priority: type === 'wrap_up' || type === 'finish' ? 'urgent' : 'normal',
+      expiresAt: new Date(Date.now() + 20000).toISOString(),
+    };
+
+    if (selectedClassId === classId || selectedClassId === 'all') {
+      setActiveCues((prev) => [newCue, ...prev]);
+      playCueSound(newCue.priority);
+    }
+
+    setAllClassHubs((prev) => {
+      const classData = prev[classId] || prev.kb;
+      const updated = {
+        ...prev,
+        [classId]: {
+          ...classData,
+          activeCues: [newCue, ...(classData.activeCues || [])],
+        },
+      };
+      try {
+        localStorage.setItem('kids_church_multi_class_hubs_v2', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+
+    dispatchBroadcast('STAGE_CUE', newCue);
+  }, [activeRole, authUser.name, dispatchBroadcast, playCueSound, selectedClassId]);
 
   // Service Templates CRUD
   const createTemplate = useCallback((newTemplateData: Omit<ServiceTemplate, 'id' | 'createdAt' | 'updatedAt'>) => {
@@ -1070,5 +1281,15 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
     addPrayerRequest,
     updateReview,
     setLessonNotes,
+    selectedClassId,
+    switchClassHub,
+    activeClassInfo,
+    allClassesConfig: CLASSES_CONFIG,
+    allClassHubs,
+    registeredAccounts,
+    addNewAccount,
+    deleteUserAccount,
+    broadcastCueToAllClasses,
+    sendCueToClass,
   };
 }
