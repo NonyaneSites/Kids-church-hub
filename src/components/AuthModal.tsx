@@ -19,10 +19,20 @@ import {
   Trash2,
   Filter,
   CheckCircle2,
-  Tag
+  Tag,
+  MessageCircle,
+  AlertTriangle,
+  RotateCcw
 } from 'lucide-react';
 import { Role, AuthUser, ClassId, ClassInfo } from '../types/hub';
 import { CLASSES_CONFIG } from '../data/classHubsData';
+import { 
+  validateSouthAfricanPhone, 
+  formatSouthAfricanDisplay, 
+  getSouthAfricaWhatsAppLink, 
+  normalizeToE164ZA 
+} from '../utils/southAfricaPhone';
+import { clearAllSeedAccounts, resetToSeedAccounts } from '../lib/supabase';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -59,7 +69,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onDeleteAccount,
   initialTab = 'quick_switch',
 }) => {
-  const [activeTab, setActiveTab] = useState<'quick_switch' | 'login' | 'register' | 'manage' | 'permissions'>(initialTab);
+  const isDirector = currentUser?.role === 'director' || (currentUser?.role === 'admin' && currentUser?.assignedClassId === 'all');
+  const isClassAdmin = currentUser?.role === 'admin' && currentUser?.assignedClassId !== 'all';
+  const canCreateAccounts = isDirector || isClassAdmin;
+
+  const [activeTab, setActiveTab] = useState<'quick_switch' | 'login' | 'register' | 'manage' | 'permissions'>(
+    initialTab === 'register' && !canCreateAccounts ? 'quick_switch' : initialTab
+  );
   
   // Custom Login State
   const [emailInput, setEmailInput] = useState('');
@@ -68,13 +84,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [selectedRole, setSelectedRole] = useState<Role>('admin');
   const [selectedClassId, setSelectedClassId] = useState<ClassId>('all');
   
-  // Register Account State
+  // Register Account State (Lock to admin's assigned class if not director)
+  const defaultClass = isClassAdmin && currentUser.assignedClassId !== 'all' ? currentUser.assignedClassId : 'jy';
   const [regName, setRegName] = useState('');
   const [regEmail, setRegEmail] = useState('');
   const [regPassword, setRegPassword] = useState('');
   const [regPhone, setRegPhone] = useState('');
   const [regRole, setRegRole] = useState<Role>('tech');
-  const [regClassId, setRegClassId] = useState<ClassId>('jy');
+  const [regClassId, setRegClassId] = useState<ClassId>(defaultClass);
   const [regRoleTitle, setRegRoleTitle] = useState('');
   const [regAvatarColor, setRegAvatarColor] = useState(AVATAR_COLORS[1]);
 
@@ -116,6 +133,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   const handleRegisterNewUser = (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Enforce permissions: Only Director or Class Admin can register accounts
+    if (!canCreateAccounts) {
+      setErrorMsg('Unauthorized: Only directors and class admins have permission to create accounts.');
+      return;
+    }
+
     if (!regName.trim()) {
       setErrorMsg('Please enter the team member’s full name');
       return;
@@ -125,19 +149,45 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
-    const classInfo = CLASSES_CONFIG.find(c => c.id === regClassId);
-    const fallbackTitle = regClassId === 'all'
-      ? `${regRole === 'admin' ? 'Ministry Director' : regRole === 'tech' ? 'Technical Lead' : regRole === 'presenter' ? 'Lead Presenter' : 'Comms Lead'}`
-      : `${classInfo?.shortCode || ''} ${regRole === 'admin' ? 'Class Lead' : regRole === 'tech' ? 'Tech Volunteer' : regRole === 'presenter' ? 'Teacher / Storyteller' : 'Comms Desk'}`;
+    // WhatsApp / Phone is required and catered for South Africa
+    if (!regPhone.trim()) {
+      setErrorMsg('South African WhatsApp / Phone number is required.');
+      return;
+    }
+
+    const zaValidation = validateSouthAfricanPhone(regPhone);
+    if (!zaValidation.isValid) {
+      setErrorMsg(zaValidation.errorMessage || 'Invalid South African mobile number (e.g. 082 123 4567 or +27 82 123 4567).');
+      return;
+    }
+
+    // Class admins can only create accounts for their own class
+    const effectiveClassId: ClassId = isClassAdmin && currentUser.assignedClassId !== 'all' 
+      ? currentUser.assignedClassId 
+      : regClassId;
+
+    // Class admins cannot create directors or other admins
+    const effectiveRole: Role = isClassAdmin && (regRole === 'director' || regRole === 'admin')
+      ? 'tech'
+      : regRole;
+
+    const classInfo = CLASSES_CONFIG.find(c => c.id === effectiveClassId);
+    const fallbackTitle = effectiveClassId === 'all'
+      ? `${effectiveRole === 'director' ? 'Ministry Director' : effectiveRole === 'admin' ? 'Class Lead Admin' : effectiveRole === 'tech' ? 'Technical Lead' : effectiveRole === 'presenter' ? 'Lead Presenter' : 'Comms Lead'}`
+      : `${classInfo?.shortCode || ''} ${effectiveRole === 'admin' ? 'Class Admin' : effectiveRole === 'tech' ? 'Tech Volunteer' : effectiveRole === 'presenter' ? 'Teacher / Storyteller' : 'Comms Desk'}`;
+
+    const formattedPhone = formatSouthAfricanDisplay(regPhone);
+    const zaWhatsApp = normalizeToE164ZA(regPhone).replace(/\+/g, '');
 
     const newAccount: AuthUser = {
       id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       name: regName.trim(),
       email: regEmail.trim().toLowerCase(),
-      role: regRole,
-      assignedClassId: regClassId,
+      role: effectiveRole,
+      assignedClassId: effectiveClassId,
       roleTitle: regRoleTitle.trim() || fallbackTitle,
-      phone: regPhone.trim() || undefined,
+      phone: formattedPhone,
+      whatsapp: zaWhatsApp,
       avatarColor: regAvatarColor,
       isAuthenticated: true,
     };
@@ -151,6 +201,27 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       onClose();
       setSuccessMsg('');
     }, 800);
+  };
+
+  const handleClearAllDefaultAccounts = () => {
+    if (confirm('Are you sure you want to remove ALL default seed accounts? This will wipe the demo names so you can start with a clean slate.')) {
+      clearAllSeedAccounts();
+      // Delete from parent state
+      registeredAccounts.forEach((acc) => {
+        if (acc.id !== currentUser.id) {
+          onDeleteAccount(acc.id);
+        }
+      });
+      setSuccessMsg('Default seed accounts cleared. You can now add your own real team!');
+    }
+  };
+
+  const handleResetToDefaultAccounts = () => {
+    if (confirm('Reset accounts back to the default church seed accounts?')) {
+      const resetList = resetToSeedAccounts();
+      resetList.forEach((u) => onAddNewAccount(u));
+      setSuccessMsg('Accounts reset to church defaults.');
+    }
   };
 
   const filteredAccounts = registeredAccounts.filter((account) => {
@@ -234,17 +305,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             <span>Quick Switch</span>
           </button>
 
-          <button
-            onClick={() => { setActiveTab('register'); setErrorMsg(''); }}
-            className={`flex-1 min-w-[110px] py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 whitespace-nowrap ${
-              activeTab === 'register'
-                ? 'bg-purple-600 text-white shadow-[0_0_15px_rgba(147,51,234,0.4)]'
-                : 'text-gray-400 hover:text-white'
-            }`}
-          >
-            <UserPlus className="w-3.5 h-3.5 text-purple-300" />
-            <span>+ Add Account</span>
-          </button>
+          {canCreateAccounts && (
+            <button
+              onClick={() => { setActiveTab('register'); setErrorMsg(''); }}
+              className={`flex-1 min-w-[110px] py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 whitespace-nowrap ${
+                activeTab === 'register'
+                  ? 'bg-purple-600 text-white shadow-[0_0_15px_rgba(147,51,234,0.4)]'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              <UserPlus className="w-3.5 h-3.5 text-purple-300" />
+              <span>+ Add Account</span>
+            </button>
+          )}
 
           <button
             onClick={() => { setActiveTab('manage'); setErrorMsg(''); }}
@@ -425,16 +498,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-bold text-gray-300 uppercase tracking-wider mb-1">
-                    Phone / WhatsApp (Optional)
+                  <label className="block text-[10px] font-bold text-gray-300 uppercase tracking-wider mb-1 flex items-center justify-between">
+                    <span>South Africa WhatsApp / Phone *</span>
+                    <span className="text-emerald-400 font-normal text-[10px]">🇿🇦 Required for WhatsApp & Alerts</span>
                   </label>
-                  <input
-                    type="tel"
-                    value={regPhone}
-                    onChange={(e) => setRegPhone(e.target.value)}
-                    placeholder="+1 (555) 019-9944"
-                    className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-purple-500"
-                  />
+                  <div className="relative">
+                    <input
+                      type="tel"
+                      required
+                      value={regPhone}
+                      onChange={(e) => setRegPhone(e.target.value)}
+                      placeholder="e.g. 082 123 4567 or +27 82 123 4567"
+                      className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-purple-500"
+                    />
+                  </div>
+                  <p className="text-[10px] text-gray-500 mt-0.5">
+                    Enter a valid South African mobile number (starts with 06, 07, 08 or +27).
+                  </p>
                 </div>
               </div>
 
@@ -442,105 +522,124 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <div>
                 <label className="block text-[10px] font-bold text-gray-300 uppercase tracking-wider mb-1.5 flex items-center justify-between">
                   <span>Assigned Class Hub *</span>
-                  <span className="text-purple-400 font-normal text-[10px]">User will automatically open this hub</span>
+                  {isClassAdmin ? (
+                    <span className="text-amber-400 font-bold text-[10px]">Locked to Your Class (Admin Policy)</span>
+                  ) : (
+                    <span className="text-purple-400 font-normal text-[10px]">User will automatically open this hub</span>
+                  )}
                 </label>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setRegClassId('jy')}
-                    className={`p-2.5 rounded-xl border text-left transition-all ${
-                      regClassId === 'jy'
-                        ? 'bg-blue-600/30 border-blue-500 ring-2 ring-blue-500/40'
-                        : 'bg-black/30 border-white/10 hover:border-blue-500/40'
-                    }`}
-                  >
-                    <div className="flex items-center gap-1.5 font-bold text-xs text-white">
-                      <span className="w-2 h-2 rounded-full bg-blue-400"></span>
-                      Junior Youth
-                    </div>
-                    <div className="text-[10px] text-blue-300 font-mono">Blue Class • Gr 6-7</div>
-                  </button>
 
-                  <button
-                    type="button"
-                    onClick={() => setRegClassId('tb')}
-                    className={`p-2.5 rounded-xl border text-left transition-all ${
-                      regClassId === 'tb'
-                        ? 'bg-pink-600/30 border-pink-500 ring-2 ring-pink-500/40'
-                        : 'bg-black/30 border-white/10 hover:border-pink-500/40'
-                    }`}
-                  >
-                    <div className="flex items-center gap-1.5 font-bold text-xs text-white">
-                      <span className="w-2 h-2 rounded-full bg-pink-400"></span>
-                      TRAILBLAZERS
+                {isClassAdmin ? (
+                  <div className="p-3 rounded-xl bg-purple-900/20 border border-purple-500/40 flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-xs font-bold text-white">
+                      <span className="w-2.5 h-2.5 rounded-full bg-purple-400"></span>
+                      <span>
+                        {CLASSES_CONFIG.find(c => c.id === currentUser.assignedClassId)?.name || currentUser.assignedClassId} Class Hub
+                      </span>
                     </div>
-                    <div className="text-[10px] text-pink-300 font-mono">Pink Class • Gr 4-5</div>
-                  </button>
+                    <span className="text-[10px] text-gray-400 font-mono">
+                      Restricted to your class
+                    </span>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setRegClassId('jy')}
+                      className={`p-2.5 rounded-xl border text-left transition-all ${
+                        regClassId === 'jy'
+                          ? 'bg-blue-600/30 border-blue-500 ring-2 ring-blue-500/40'
+                          : 'bg-black/30 border-white/10 hover:border-blue-500/40'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 font-bold text-xs text-white">
+                        <span className="w-2 h-2 rounded-full bg-blue-400"></span>
+                        Junior Youth
+                      </div>
+                      <div className="text-[10px] text-blue-300 font-mono">Blue Class • Gr 6-7</div>
+                    </button>
 
-                  <button
-                    type="button"
-                    onClick={() => setRegClassId('kb')}
-                    className={`p-2.5 rounded-xl border text-left transition-all ${
-                      regClassId === 'kb'
-                        ? 'bg-red-600/30 border-red-500 ring-2 ring-red-500/40'
-                        : 'bg-black/30 border-white/10 hover:border-red-500/40'
-                    }`}
-                  >
-                    <div className="flex items-center gap-1.5 font-bold text-xs text-white">
-                      <span className="w-2 h-2 rounded-full bg-red-400"></span>
-                      Kingdom Builders
-                    </div>
-                    <div className="text-[10px] text-red-300 font-mono">Red Class • Gr 1-3</div>
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => setRegClassId('tb')}
+                      className={`p-2.5 rounded-xl border text-left transition-all ${
+                        regClassId === 'tb'
+                          ? 'bg-pink-600/30 border-pink-500 ring-2 ring-pink-500/40'
+                          : 'bg-black/30 border-white/10 hover:border-pink-500/40'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 font-bold text-xs text-white">
+                        <span className="w-2 h-2 rounded-full bg-pink-400"></span>
+                        TRAILBLAZERS
+                      </div>
+                      <div className="text-[10px] text-pink-300 font-mono">Pink Class • Gr 4-5</div>
+                    </button>
 
-                  <button
-                    type="button"
-                    onClick={() => setRegClassId('la-orange')}
-                    className={`p-2.5 rounded-xl border text-left transition-all ${
-                      regClassId === 'la-orange'
-                        ? 'bg-orange-600/30 border-orange-500 ring-2 ring-orange-500/40'
-                        : 'bg-black/30 border-white/10 hover:border-orange-500/40'
-                    }`}
-                  >
-                    <div className="flex items-center gap-1.5 font-bold text-xs text-white">
-                      <span className="w-2 h-2 rounded-full bg-orange-400"></span>
-                      LA Orange
-                    </div>
-                    <div className="text-[10px] text-orange-300 font-mono">Orange • 5-6 yrs</div>
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => setRegClassId('kb')}
+                      className={`p-2.5 rounded-xl border text-left transition-all ${
+                        regClassId === 'kb'
+                          ? 'bg-red-600/30 border-red-500 ring-2 ring-red-500/40'
+                          : 'bg-black/30 border-white/10 hover:border-red-500/40'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 font-bold text-xs text-white">
+                        <span className="w-2 h-2 rounded-full bg-red-400"></span>
+                        Kingdom Builders
+                      </div>
+                      <div className="text-[10px] text-red-300 font-mono">Red Class • Gr 1-3</div>
+                    </button>
 
-                  <button
-                    type="button"
-                    onClick={() => setRegClassId('la-yellow')}
-                    className={`p-2.5 rounded-xl border text-left transition-all ${
-                      regClassId === 'la-yellow'
-                        ? 'bg-yellow-600/30 border-yellow-500 ring-2 ring-yellow-500/40'
-                        : 'bg-black/30 border-white/10 hover:border-yellow-500/40'
-                    }`}
-                  >
-                    <div className="flex items-center gap-1.5 font-bold text-xs text-white">
-                      <span className="w-2 h-2 rounded-full bg-yellow-400"></span>
-                      LA Yellow
-                    </div>
-                    <div className="text-[10px] text-yellow-300 font-mono">Yellow • 3-4 yrs</div>
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => setRegClassId('la-orange')}
+                      className={`p-2.5 rounded-xl border text-left transition-all ${
+                        regClassId === 'la-orange'
+                          ? 'bg-orange-600/30 border-orange-500 ring-2 ring-orange-500/40'
+                          : 'bg-black/30 border-white/10 hover:border-orange-500/40'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 font-bold text-xs text-white">
+                        <span className="w-2 h-2 rounded-full bg-orange-400"></span>
+                        LA Orange
+                      </div>
+                      <div className="text-[10px] text-orange-300 font-mono">Orange • 5-6 yrs</div>
+                    </button>
 
-                  <button
-                    type="button"
-                    onClick={() => setRegClassId('all')}
-                    className={`p-2.5 rounded-xl border text-left transition-all ${
-                      regClassId === 'all'
-                        ? 'bg-purple-600/30 border-purple-500 ring-2 ring-purple-500/40'
-                        : 'bg-black/30 border-white/10 hover:border-purple-500/40'
-                    }`}
-                  >
-                    <div className="flex items-center gap-1.5 font-bold text-xs text-white">
-                      <span className="w-2 h-2 rounded-full bg-purple-400"></span>
-                      All Classes
-                    </div>
-                    <div className="text-[10px] text-purple-300 font-mono">Director / Multi</div>
-                  </button>
-                </div>
+                    <button
+                      type="button"
+                      onClick={() => setRegClassId('la-yellow')}
+                      className={`p-2.5 rounded-xl border text-left transition-all ${
+                        regClassId === 'la-yellow'
+                          ? 'bg-yellow-600/30 border-yellow-500 ring-2 ring-yellow-500/40'
+                          : 'bg-black/30 border-white/10 hover:border-yellow-500/40'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 font-bold text-xs text-white">
+                        <span className="w-2 h-2 rounded-full bg-yellow-400"></span>
+                        LA Yellow
+                      </div>
+                      <div className="text-[10px] text-yellow-300 font-mono">Yellow • 3-4 yrs</div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setRegClassId('all')}
+                      className={`p-2.5 rounded-xl border text-left transition-all ${
+                        regClassId === 'all'
+                          ? 'bg-purple-600/30 border-purple-500 ring-2 ring-purple-500/40'
+                          : 'bg-black/30 border-white/10 hover:border-purple-500/40'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 font-bold text-xs text-white">
+                        <span className="w-2 h-2 rounded-full bg-purple-400"></span>
+                        All Classes
+                      </div>
+                      <div className="text-[10px] text-purple-300 font-mono">Director / Multi</div>
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Role Selection */}
@@ -549,19 +648,21 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   Assigned Duty / Role *
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setRegRole('admin')}
-                    className={`p-2.5 rounded-xl border text-center transition-all ${
-                      regRole === 'admin'
-                        ? 'bg-amber-500/20 border-amber-500 text-amber-300'
-                        : 'bg-black/30 border-white/10 text-gray-400 hover:text-white'
-                    }`}
-                  >
-                    <ShieldCheck className="w-4 h-4 mx-auto mb-1" />
-                    <div className="text-[11px] font-bold">Admin</div>
-                    <div className="text-[9px] opacity-75">Director / Lead</div>
-                  </button>
+                  {isDirector && (
+                    <button
+                      type="button"
+                      onClick={() => setRegRole('admin')}
+                      className={`p-2.5 rounded-xl border text-center transition-all ${
+                        regRole === 'admin'
+                          ? 'bg-amber-500/20 border-amber-500 text-amber-300'
+                          : 'bg-black/30 border-white/10 text-gray-400 hover:text-white'
+                      }`}
+                    >
+                      <ShieldCheck className="w-4 h-4 mx-auto mb-1" />
+                      <div className="text-[11px] font-bold">Admin</div>
+                      <div className="text-[9px] opacity-75">Class Lead</div>
+                    </button>
+                  )}
 
                   <button
                     type="button"
@@ -653,15 +754,46 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </form>
           )}
 
-          {/* TAB 3: MANAGE ACCOUNTS (VIEW & DELETE) */}
+          {/* TAB 3: MANAGE ACCOUNTS (VIEW, WHATSAPP & DELETE) */}
           {activeTab === 'manage' && (
             <div className="space-y-4">
+              {/* Clean Slate & Seed Accounts Controls */}
+              {isDirector && (
+                <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-2.5 text-xs">
+                  <div className="flex items-center gap-2 text-amber-300">
+                    <AlertTriangle className="w-4 h-4 shrink-0" />
+                    <div>
+                      <span className="font-bold">Manage Default People & Demo Names</span>
+                      <p className="text-[11px] text-gray-400">Remove all default mock people to start with your actual church volunteer team.</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleClearAllDefaultAccounts}
+                      className="px-2.5 py-1 rounded-lg bg-red-600/40 hover:bg-red-600 border border-red-500/40 text-red-200 hover:text-white text-[11px] font-bold transition-colors flex items-center gap-1"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      <span>Remove Default People</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleResetToDefaultAccounts}
+                      title="Reset back to default seed accounts"
+                      className="p-1 rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition-colors"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className="flex flex-col sm:flex-row items-center gap-2 justify-between">
                 <input
                   type="text"
                   value={manageSearch}
                   onChange={(e) => setManageSearch(e.target.value)}
-                  placeholder="Search by name or email..."
+                  placeholder="Search by name, email or phone..."
                   className="w-full sm:w-64 bg-black/40 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-purple-500"
                 />
 
@@ -683,7 +815,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
                 {filteredAccounts.map((user) => {
                   const isCurrent = currentUser?.id === user.id;
-                  const isPreconfigured = ['usr-admin-1', 'usr-tech-jy', 'usr-presenter-kb', 'usr-comms-tb', 'usr-orange-lead', 'usr-yellow-lead'].includes(user.id);
+                  const waNumber = user.whatsapp || user.phone;
+                  const waLink = waNumber ? getSouthAfricaWhatsAppLink(waNumber) : '';
+
                   return (
                     <div
                       key={user.id}
@@ -705,11 +839,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                             )}
                           </div>
                           <div className="text-[11px] text-gray-400">{user.email} • {user.roleTitle || user.role}</div>
-                          <div className="flex items-center gap-1.5 mt-1">
+                          <div className="flex items-center gap-2 mt-1 flex-wrap">
                             {getClassBadge(user.assignedClassId)}
                             {user.phone && (
-                              <span className="text-[10px] text-gray-500 font-mono flex items-center gap-0.5">
-                                <Phone className="w-2.5 h-2.5" />
+                              <span className="text-[10px] text-gray-400 font-mono flex items-center gap-0.5">
+                                <span>🇿🇦</span>
                                 {user.phone}
                               </span>
                             )}
@@ -717,7 +851,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {waLink && (
+                          <a
+                            href={waLink}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="px-2 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 rounded-lg text-xs font-bold border border-emerald-500/30 transition-colors flex items-center gap-1"
+                            title="Message on WhatsApp"
+                          >
+                            <MessageCircle className="w-3 h-3 text-emerald-400" />
+                            <span className="hidden sm:inline">WhatsApp</span>
+                          </a>
+                        )}
+
                         {!isCurrent && (
                           <button
                             type="button"
@@ -728,20 +875,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                           </button>
                         )}
 
-                        {!isPreconfigured && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (confirm(`Remove account for ${user.name}?`)) {
-                                onDeleteAccount(user.id);
-                              }
-                            }}
-                            title="Delete this registered account"
-                            className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
+                        {/* Allow deleting any account including preconfigured ones */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (confirm(`Remove account for ${user.name}?`)) {
+                              onDeleteAccount(user.id);
+                            }
+                          }}
+                          title="Delete this account"
+                          className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     </div>
                   );
@@ -831,7 +977,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   Admin / Director
                 </div>
                 <p className="text-gray-400 text-[11px]">
-                  Full control over all 5 classrooms, service templates, Holy Spirit time overrides, global broadcast cues, emergency stop, team rosters, and post-service reviews.
+                  Full control over all 5 classes, service templates, Holy Spirit time overrides, global broadcast cues, emergency stop, team rosters, and post-service reviews.
                 </p>
               </div>
 
@@ -841,7 +987,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   Tech & Systems
                 </div>
                 <p className="text-gray-400 text-[11px]">
-                  Manages worship tracks, lesson slide presentation, room audio equipment checklist, DJ soundboard effects, and classroom incident resolution.
+                  Manages worship tracks, lesson slide presentation, stage audio equipment checklist, DJ soundboard effects, and class incident resolution.
                 </p>
               </div>
 

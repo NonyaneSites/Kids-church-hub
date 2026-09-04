@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Role, QuickMessageType, ServiceTemplate, ClassId } from './types/hub';
 import { useServiceSync } from './hooks/useServiceSync';
 import { Navbar } from './components/Navbar';
@@ -11,6 +11,7 @@ import { TeamResources } from './components/TeamResources';
 import { PlannerReview } from './components/PlannerReview';
 import { MobileDeviceSimulator } from './components/MobileDeviceSimulator';
 import { AuthModal } from './components/AuthModal';
+import { SignInGate } from './components/SignInGate';
 import { IncidentRealtimeToast } from './components/IncidentRealtimeToast';
 import { ServiceTemplateEditor } from './components/ServiceTemplateEditor';
 import { 
@@ -89,6 +90,31 @@ export default function App() {
     sendCueToClass,
   } = useServiceSync(activeRole);
 
+  const isDirector = authUser?.role === 'director' || (authUser?.role === 'admin' && authUser?.assignedClassId === 'all');
+  const isTechOnly = authUser?.role === 'tech';
+  const isPresenterOnly = authUser?.role === 'presenter';
+  const isCommsOnly = authUser?.role === 'comms';
+
+  // Strict role and class isolation enforcement
+  useEffect(() => {
+    if (!authUser || !authUser.isAuthenticated) return;
+
+    if (isTechOnly && activeTab !== 'tech') {
+      setActiveTab('tech');
+    } else if (isPresenterOnly && activeTab !== 'presenter') {
+      setActiveTab('presenter');
+    } else if (isCommsOnly && activeTab !== 'comms') {
+      setActiveTab('comms');
+    } else if (!isDirector && (activeTab === 'all-classes' || activeTab === 'templates')) {
+      setActiveTab('comms');
+    }
+
+    // Force non-directors to their assigned class hub
+    if (!isDirector && authUser.assignedClassId && authUser.assignedClassId !== 'all' && selectedClassId !== authUser.assignedClassId) {
+      switchClassHub(authUser.assignedClassId);
+    }
+  }, [authUser, isTechOnly, isPresenterOnly, isCommsOnly, isDirector, activeTab, selectedClassId, switchClassHub]);
+
   const handleRoleChange = (newRole: Role) => {
     setActiveRole(newRole);
     if (newRole === 'comms') setActiveTab('comms');
@@ -101,6 +127,23 @@ export default function App() {
     setAuthModalInitialTab(tab || 'quick_switch');
     setIsAuthModalOpen(true);
   };
+
+  // Sign In Gate: Require authentication before accessing the application
+  if (!authUser || !authUser.isAuthenticated) {
+    return (
+      <SignInGate
+        onSignIn={(user) => {
+          switchAuthUser(user);
+          if (user.role === 'tech') setActiveTab('tech');
+          else if (user.role === 'presenter') setActiveTab('presenter');
+          else if (user.role === 'comms') setActiveTab('comms');
+          else if (user.role === 'director' || user.assignedClassId === 'all') setActiveTab('all-classes');
+          else setActiveTab('comms');
+        }}
+        registeredAccounts={registeredAccounts}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#0b0b12] text-slate-100 flex flex-col selection:bg-purple-600 selection:text-white">
@@ -130,6 +173,7 @@ export default function App() {
         currentSegment={currentSegment}
         currentUser={authUser}
         onOpenAuthModal={handleOpenAuthModal}
+        onLogout={logoutUser}
         selectedClassId={selectedClassId}
         onSelectClass={switchClassHub}
         allClasses={allClassesConfig}
@@ -168,24 +212,23 @@ export default function App() {
                 {activeClassInfo.name} Hub
               </span>
               <span className="text-gray-400">({activeClassInfo.colorName} Class • {activeClassInfo.grade})</span>
-              <span className="text-purple-300/80 font-mono bg-white/5 px-2 py-0.5 rounded-md border border-white/5">
-                {activeClassInfo.room}
-              </span>
             </div>
 
             <div className="flex items-center gap-3 text-gray-400 text-[11px]">
               <span>Lead: <strong className="text-white">{activeClassInfo.defaultLead}</strong></span>
               <span>•</span>
               <span>Capacity: <strong className="text-white">{activeClassInfo.capacity} kids</strong></span>
-              <button
-                onClick={() => {
-                  switchClassHub('all');
-                  setActiveTab('all-classes');
-                }}
-                className="text-purple-400 hover:text-purple-300 font-bold underline ml-1"
-              >
-                Switch to All Classes View &rarr;
-              </button>
+              {isDirector && (
+                <button
+                  onClick={() => {
+                    switchClassHub('all');
+                    setActiveTab('all-classes');
+                  }}
+                  className="text-purple-400 hover:text-purple-300 font-bold underline ml-1"
+                >
+                  Switch to All Classes View &rarr;
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -193,8 +236,8 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
-        {/* TAB 0: Master All-Classes Command Center */}
-        {activeTab === 'all-classes' && (
+        {/* TAB 0: Master All-Classes Command Center (DIRECTORS ONLY) */}
+        {isDirector && activeTab === 'all-classes' && (
           <AllClassesOverview
             allClassHubs={allClassHubs}
             hubsData={allClassHubs}
@@ -217,7 +260,7 @@ export default function App() {
         )}
 
         {/* TAB 1: Comms Dashboard for Selected Class Hub */}
-        {activeTab === 'comms' && (
+        {(isCommsOnly || isDirector || (!isTechOnly && !isPresenterOnly)) && activeTab === 'comms' && (
           <CommsDashboard
             segments={segments}
             currentSegment={currentSegment}
@@ -233,8 +276,8 @@ export default function App() {
           />
         )}
 
-        {/* TAB 2: Tech Console for Selected Class Hub */}
-        {activeTab === 'tech' && (
+        {/* TAB 2: Tech Console for Selected Class Hub (Tech Leads ONLY see this!) */}
+        {(isTechOnly || isDirector || (!isPresenterOnly && !isCommsOnly)) && activeTab === 'tech' && (
           <TechConsole
             checklist={checklist}
             toggleChecklistItem={toggleChecklistItem}
@@ -257,8 +300,8 @@ export default function App() {
           />
         )}
 
-        {/* TAB 3: Presenter HUD for Selected Class Hub */}
-        {activeTab === 'presenter' && (
+        {/* TAB 3: Presenter HUD for Selected Class Hub (Presenters ONLY see this!) */}
+        {(isPresenterOnly || isDirector || (!isTechOnly && !isCommsOnly)) && activeTab === 'presenter' && (
           <PresenterMode
             currentSegment={currentSegment}
             nextSegment={nextSegment}
@@ -271,7 +314,7 @@ export default function App() {
         )}
 
         {/* TAB 4: Team & Resources (with account registration & class roster) */}
-        {activeTab === 'team' && (
+        {!isTechOnly && !isPresenterOnly && !isCommsOnly && activeTab === 'team' && (
           <TeamResources
             teamMembers={teamMembers}
             lessonNotes={lessonNotes}
@@ -286,7 +329,7 @@ export default function App() {
         )}
 
         {/* TAB 5: Planner & Review */}
-        {activeTab === 'planner' && (
+        {!isTechOnly && !isPresenterOnly && !isCommsOnly && activeTab === 'planner' && (
           <PlannerReview
             reviewData={reviewData}
             updateReview={updateReview}
@@ -295,8 +338,8 @@ export default function App() {
           />
         )}
 
-        {/* TAB 6: Service Templates Editor */}
-        {activeTab === 'templates' && (
+        {/* TAB 6: Service Templates Editor (DIRECTORS ONLY) */}
+        {isDirector && activeTab === 'templates' && (
           <ServiceTemplateEditor
             currentUser={authUser}
             templates={serviceTemplates}
@@ -351,7 +394,7 @@ export default function App() {
         <div className="flex items-center gap-4 py-1">
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-            <span className="text-[10px] font-bold tracking-widest uppercase opacity-80 text-white">5-Class Multi-Room Network Active</span>
+            <span className="text-[10px] font-bold tracking-widest uppercase opacity-80 text-white">5-Class Network Active</span>
           </div>
           <span className="hidden sm:inline text-white/20">|</span>
           <div className="hidden sm:flex items-center gap-2">
@@ -364,7 +407,7 @@ export default function App() {
           <div className="hidden md:flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-amber-500"></span>
             <span className="text-[10px] font-mono uppercase opacity-60">
-              User: {authUser.name} ({authUser.assignedClassId === 'all' ? 'Director' : authUser.assignedClassId?.toUpperCase()})
+              User: {authUser?.name} ({authUser?.assignedClassId === 'all' ? 'Director' : authUser?.assignedClassId?.toUpperCase()})
             </span>
           </div>
         </div>

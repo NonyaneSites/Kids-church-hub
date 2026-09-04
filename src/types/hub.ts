@@ -1,4 +1,4 @@
-export type Role = 'admin' | 'comms' | 'tech' | 'presenter';
+export type Role = 'director' | 'admin' | 'comms' | 'tech' | 'presenter' | 'volunteer';
 
 export type ClassId = 'jy' | 'tb' | 'kb' | 'la-orange' | 'la-yellow' | 'all';
 
@@ -10,7 +10,9 @@ export interface ClassInfo {
   colorHex: string;
   grade: string;
   ageGroup: string;
-  room: string;
+  room?: string;
+  capacity?: number;
+  defaultLead?: string;
   themeBadge: string;
   accentBorder: string;
   accentBg: string;
@@ -191,6 +193,7 @@ export interface AuthUser {
   assignedClassId: ClassId;
   avatarColor: string;
   phone?: string;
+  whatsapp?: string;
   isAuthenticated: boolean;
 }
 

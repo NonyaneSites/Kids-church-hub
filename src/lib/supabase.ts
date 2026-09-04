@@ -36,62 +36,62 @@ export function getSupabaseClient(): SupabaseClient | null {
 }
 
 // -------------------------------------------------------------
-// DEFAULT PRE-CONFIGURED USERS & ROLES TABLE
+// DEFAULT PRE-CONFIGURED USERS & ROLES TABLE (SOUTH AFRICA CONTEXT)
 // -------------------------------------------------------------
 export const PRECONFIGURED_USERS: AuthUser[] = [
   {
     id: 'usr-admin-1',
-    email: 'admin@crc.church',
+    email: 'director@crc.church',
     name: 'Pastor Hope',
-    role: 'admin',
-    roleTitle: 'Kids Ministry Director / Admin',
+    role: 'director',
+    roleTitle: 'Kids Ministry Director',
     assignedClassId: 'all',
-    avatarColor: 'from-amber-500 to-orange-600',
-    phone: '+1 (555) 019-2834',
+    avatarColor: 'from-purple-600 to-indigo-600',
+    phone: '+27 82 555 0192',
     isAuthenticated: true,
   },
   {
     id: 'usr-tech-jy',
-    email: 'tech@crc.church',
-    name: 'Thabo',
+    email: 'tech.jy@crc.church',
+    name: 'Thabo Ndlovu',
     role: 'tech',
     roleTitle: 'Junior Youth Tech Lead',
     assignedClassId: 'jy',
     avatarColor: 'from-blue-500 to-cyan-600',
-    phone: '+1 (555) 019-5512',
+    phone: '+27 83 444 5512',
     isAuthenticated: true,
   },
   {
     id: 'usr-presenter-kb',
-    email: 'presenter@crc.church',
-    name: 'Lebo',
+    email: 'presenter.kb@crc.church',
+    name: 'Lebo Moloi',
     role: 'presenter',
     roleTitle: 'Kingdom Builders Presenter',
     assignedClassId: 'kb',
     avatarColor: 'from-purple-500 to-indigo-600',
-    phone: '+1 (555) 019-8821',
+    phone: '+27 71 333 8821',
     isAuthenticated: true,
   },
   {
     id: 'usr-comms-tb',
-    email: 'comms@crc.church',
-    name: 'Nomsa',
-    role: 'comms',
-    roleTitle: 'TRAILBLAZERS Comms Lead',
+    email: 'comms.tb@crc.church',
+    name: 'Nomsa Khumalo',
+    role: 'admin',
+    roleTitle: 'TRAILBLAZERS Class Admin',
     assignedClassId: 'tb',
     avatarColor: 'from-pink-500 to-rose-600',
-    phone: '+1 (555) 019-4490',
+    phone: '+27 84 222 4490',
     isAuthenticated: true,
   },
   {
     id: 'usr-orange-lead',
     email: 'grace@crc.church',
     name: 'Aunty Grace',
-    role: 'presenter',
-    roleTitle: 'Little Adventures Orange Storyteller',
+    role: 'admin',
+    roleTitle: 'Little Adventures Orange Class Admin',
     assignedClassId: 'la-orange',
     avatarColor: 'from-orange-500 to-amber-600',
-    phone: '+1 (555) 019-7711',
+    phone: '+27 72 111 7711',
     isAuthenticated: true,
   },
   {
@@ -102,20 +102,57 @@ export const PRECONFIGURED_USERS: AuthUser[] = [
     roleTitle: 'Little Adventures Yellow Music & Tech',
     assignedClassId: 'la-yellow',
     avatarColor: 'from-yellow-500 to-amber-600',
-    phone: '+1 (555) 019-3329',
+    phone: '+27 73 999 3329',
+    isAuthenticated: true,
+  },
+  {
+    id: 'usr-guest',
+    email: 'guest@crc.church',
+    name: 'Guest Volunteer',
+    role: 'presenter',
+    roleTitle: 'Guest Presenter (Stage HUD)',
+    assignedClassId: 'kb',
+    avatarColor: 'from-gray-600 to-slate-700',
+    phone: '+27 82 000 1234',
     isAuthenticated: true,
   },
 ];
 
-const LOCAL_USERS_STORAGE_KEY = 'kids_church_registered_users_v2';
+const LOCAL_USERS_STORAGE_KEY = 'kids_church_registered_users_v3';
+const SEED_CLEARED_FLAG_KEY = 'kids_church_seed_users_cleared';
+
+export function clearAllSeedAccounts(): void {
+  try {
+    localStorage.setItem(SEED_CLEARED_FLAG_KEY, 'true');
+    localStorage.setItem(LOCAL_USERS_STORAGE_KEY, JSON.stringify([]));
+  } catch (e) {
+    console.error('Failed to clear seed accounts:', e);
+  }
+}
+
+export function resetToSeedAccounts(): AuthUser[] {
+  try {
+    localStorage.removeItem(SEED_CLEARED_FLAG_KEY);
+    localStorage.setItem(LOCAL_USERS_STORAGE_KEY, JSON.stringify(PRECONFIGURED_USERS));
+  } catch (e) {
+    console.error('Failed to reset seed accounts:', e);
+  }
+  return PRECONFIGURED_USERS;
+}
 
 export function getStoredAccountsList(): AuthUser[] {
   try {
+    const isSeedCleared = localStorage.getItem(SEED_CLEARED_FLAG_KEY) === 'true';
     const raw = localStorage.getItem(LOCAL_USERS_STORAGE_KEY);
-    if (!raw) return PRECONFIGURED_USERS;
+    if (!raw) {
+      return isSeedCleared ? [] : PRECONFIGURED_USERS;
+    }
     const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.length > 0) {
-      // Merge preconfigured users if not present
+    if (Array.isArray(parsed)) {
+      if (isSeedCleared) {
+        return parsed;
+      }
+      // Merge preconfigured users if not present and not cleared
       const combined = [...parsed];
       for (const pre of PRECONFIGURED_USERS) {
         if (!combined.some(u => u.email === pre.email || u.id === pre.id)) {
@@ -388,7 +425,7 @@ export function getStoredAuthUser(): AuthUser {
     const saved = localStorage.getItem(STORAGE_KEYS.AUTH_USER);
     if (saved) {
       const parsed = JSON.parse(saved);
-      if (parsed && parsed.email && parsed.role) {
+      if (parsed && parsed.email && parsed.role && parsed.isAuthenticated) {
         return {
           ...parsed,
           assignedClassId: parsed.assignedClassId || 'all',
@@ -398,8 +435,17 @@ export function getStoredAuthUser(): AuthUser {
   } catch (e) {
     console.warn('Error reading stored auth user:', e);
   }
-  // Default to Admin / Pastor Hope for seamless access
-  return PRECONFIGURED_USERS[0];
+  // Unauthenticated by default so user is required to sign in or use guest account
+  return {
+    id: 'unauthenticated',
+    email: '',
+    name: '',
+    role: 'volunteer',
+    roleTitle: 'Unauthenticated',
+    assignedClassId: 'kb',
+    avatarColor: 'from-gray-600 to-gray-800',
+    isAuthenticated: false,
+  };
 }
 
 export function saveStoredAuthUser(user: AuthUser): void {

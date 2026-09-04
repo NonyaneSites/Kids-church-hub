@@ -17,7 +17,8 @@ import {
   ChevronDown,
   Globe,
   UserPlus,
-  Check
+  Check,
+  LogOut
 } from 'lucide-react';
 import { Role, ServiceSegment, AuthUser, ClassId, ClassInfo } from '../types/hub';
 import { CLASSES_CONFIG } from '../data/classHubsData';
@@ -34,6 +35,7 @@ interface NavbarProps {
   currentSegment?: ServiceSegment;
   currentUser: AuthUser;
   onOpenAuthModal: (tab?: 'quick_switch' | 'login' | 'register' | 'manage' | 'permissions') => void;
+  onLogout?: () => void;
   selectedClassId: ClassId;
   onSelectClass: (classId: ClassId) => void;
   allClasses: ClassInfo[];
@@ -51,6 +53,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   currentSegment,
   currentUser,
   onOpenAuthModal,
+  onLogout,
   selectedClassId,
   onSelectClass,
   allClasses,
@@ -86,6 +89,13 @@ export const Navbar: React.FC<NavbarProps> = ({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  const isDirector = currentUser?.role === 'director' || (currentUser?.role === 'admin' && currentUser?.assignedClassId === 'all');
+  const isClassAdmin = currentUser?.role === 'admin' && currentUser?.assignedClassId !== 'all';
+  const canCreateAccounts = isDirector || isClassAdmin;
+  const isTechOnly = currentUser?.role === 'tech';
+  const isPresenterOnly = currentUser?.role === 'presenter';
+  const isCommsOnly = currentUser?.role === 'comms';
 
   const activeClass = allClasses.find((c) => c.id === selectedClassId) || allClasses[0];
 
@@ -132,22 +142,29 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
           </div>
 
-          {/* CLASS HUB DROPDOWN SELECTOR */}
+          {/* CLASS HUB DROPDOWN SELECTOR (DIRECTORS ONLY CAN SWITCH; CLASS ADMINS/TECHS LOCKED) */}
           <div className="relative" ref={dropdownRef}>
             <button
-              onClick={() => setIsClassDropdownOpen(!isClassDropdownOpen)}
+              onClick={() => {
+                if (isDirector) {
+                  setIsClassDropdownOpen(!isClassDropdownOpen);
+                }
+              }}
+              title={isDirector ? 'Switch Class Hub' : `Assigned to ${activeClass.name} (Only Directors have multi-class switching access)`}
               className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all text-left shadow-sm ${
+                !isDirector ? 'cursor-default opacity-90' : 'cursor-pointer hover:border-purple-400'
+              } ${
                 selectedClassId === 'all'
-                  ? 'bg-purple-950/40 border-purple-500/50 hover:border-purple-400 text-white'
+                  ? 'bg-purple-950/40 border-purple-500/50 text-white'
                   : selectedClassId === 'jy'
-                  ? 'bg-blue-950/40 border-blue-500/50 hover:border-blue-400 text-white'
+                  ? 'bg-blue-950/40 border-blue-500/50 text-white'
                   : selectedClassId === 'tb'
-                  ? 'bg-pink-950/40 border-pink-500/50 hover:border-pink-400 text-white'
+                  ? 'bg-pink-950/40 border-pink-500/50 text-white'
                   : selectedClassId === 'kb'
-                  ? 'bg-red-950/40 border-red-500/50 hover:border-red-400 text-white'
+                  ? 'bg-red-950/40 border-red-500/50 text-white'
                   : selectedClassId === 'la-orange'
-                  ? 'bg-orange-950/40 border-orange-500/50 hover:border-orange-400 text-white'
-                  : 'bg-yellow-950/40 border-yellow-500/50 hover:border-yellow-400 text-white'
+                  ? 'bg-orange-950/40 border-orange-500/50 text-white'
+                  : 'bg-yellow-950/40 border-yellow-500/50 text-white'
               }`}
             >
               <div className="flex items-center gap-1.5">
@@ -165,22 +182,28 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <div className="text-xs font-bold leading-tight flex items-center gap-1.5">
                     <span>{selectedClassId === 'all' ? 'All Classes' : activeClass.name}</span>
                     <span className={`text-[9px] uppercase px-1.5 py-0.2 rounded border font-mono ${getClassBadgeStyle(selectedClassId)}`}>
-                      {selectedClassId === 'all' ? 'Multi' : activeClass.colorName}
+                      {selectedClassId === 'all' ? 'Director' : activeClass.colorName}
                     </span>
                   </div>
                   <div className="text-[10px] text-gray-400 leading-none mt-0.5">
-                    {selectedClassId === 'all' ? 'Central Overview' : `${activeClass.room} • ${activeClass.grade}`}
+                    {selectedClassId === 'all' ? 'Overseer Command' : `${activeClass.colorName} • ${activeClass.grade}`}
                   </div>
                 </div>
               </div>
-              <ChevronDown className={`w-3.5 h-3.5 text-gray-400 transition-transform ${isClassDropdownOpen ? 'rotate-180' : ''}`} />
+              {isDirector ? (
+                <ChevronDown className={`w-3.5 h-3.5 text-gray-400 transition-transform ${isClassDropdownOpen ? 'rotate-180' : ''}`} />
+              ) : (
+                <span className="text-[9px] text-gray-500 px-1 py-0.5 rounded bg-white/5 border border-white/10 ml-1">
+                  Locked
+                </span>
+              )}
             </button>
 
-            {/* Dropdown Menu */}
-            {isClassDropdownOpen && (
+            {/* Dropdown Menu (Strictly accessible by Directors) */}
+            {isClassDropdownOpen && isDirector && (
               <div className="absolute left-0 mt-2 w-72 bg-[#141424] border border-white/10 rounded-2xl shadow-2xl p-2 z-50 animate-fadeIn space-y-1">
                 <div className="px-2 py-1 text-[9px] font-bold text-gray-400 uppercase tracking-wider">
-                  Select Class Hub / Room:
+                  Director Class Switcher:
                 </div>
 
                 {/* All Classes Overview Option */}
@@ -198,7 +221,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     <Globe className="w-4 h-4 text-purple-400" />
                     <div>
                       <div className="text-xs font-bold text-white">All Classes Command Center</div>
-                      <div className="text-[10px] text-gray-400">Master 5-room monitoring & global broadcast</div>
+                      <div className="text-[10px] text-gray-400">Master 5-class monitoring & global broadcast</div>
                     </div>
                   </div>
                   {selectedClassId === 'all' && <Check className="w-4 h-4 text-purple-400" />}
@@ -234,7 +257,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                             <span>{cls.name}</span>
                             <span className="text-[9px] text-gray-400 font-normal">({cls.colorName})</span>
                           </div>
-                          <div className="text-[10px] text-gray-400">{cls.grade} • {cls.room}</div>
+                          <div className="text-[10px] text-gray-400">{cls.grade} • {cls.ageGroup}</div>
                         </div>
                       </div>
                       {isSelected && <Check className="w-4 h-4 text-emerald-400" />}
@@ -246,113 +269,163 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         </div>
 
-        {/* Center: Module Navigation Tabs */}
+        {/* Center: Module Navigation Tabs (STRICT ROLE ISOLATION) */}
         <div className="flex items-center gap-1 bg-[#161626] p-1 rounded-xl border border-white/5 overflow-x-auto shrink-0">
-          <button
-            id="nav-tab-all-classes"
-            onClick={() => setActiveTab('all-classes')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 ${
-              activeTab === 'all-classes'
-                ? 'bg-purple-600 text-white shadow-[0_0_15px_rgba(147,51,234,0.4)]'
-                : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
-            }`}
-          >
-            <Globe className="w-3.5 h-3.5 text-purple-400" />
-            <span>0. All Classes</span>
-          </button>
+          
+          {/* Tech-only role view: ONLY Tech tab */}
+          {isTechOnly && (
+            <button
+              id="nav-tab-tech"
+              onClick={() => setActiveTab('tech')}
+              className="px-4 py-2 rounded-lg text-xs font-bold whitespace-nowrap bg-purple-600 text-white shadow-[0_0_15px_rgba(147,51,234,0.4)] flex items-center gap-2"
+            >
+              <Tv className="w-4 h-4 text-blue-300" />
+              <span>Tech & Audio Console</span>
+            </button>
+          )}
 
-          <button
-            id="nav-tab-comms"
-            onClick={() => setActiveTab('comms')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 ${
-              activeTab === 'comms'
-                ? 'bg-purple-600 text-white shadow-[0_0_15px_rgba(147,51,234,0.4)]'
-                : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
-            }`}
-          >
-            <Radio className="w-3.5 h-3.5 text-emerald-400" />
-            <span>1. Comms</span>
-          </button>
+          {/* Presenter-only role view: ONLY Stage HUD tab */}
+          {isPresenterOnly && (
+            <button
+              id="nav-tab-presenter"
+              onClick={() => setActiveTab('presenter')}
+              className="px-4 py-2 rounded-lg text-xs font-bold whitespace-nowrap bg-purple-600 text-white shadow-[0_0_15px_rgba(147,51,234,0.4)] flex items-center gap-2"
+            >
+              <Clock className="w-4 h-4 text-amber-300" />
+              <span>Stage Presenter HUD</span>
+            </button>
+          )}
 
-          <button
-            id="nav-tab-tech"
-            onClick={() => setActiveTab('tech')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 ${
-              activeTab === 'tech'
-                ? 'bg-purple-600 text-white shadow-[0_0_15px_rgba(147,51,234,0.4)]'
-                : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
-            }`}
-          >
-            <Tv className="w-3.5 h-3.5 text-blue-400" />
-            <span>2. Tech</span>
-          </button>
+          {/* Comms-only role view: ONLY Comms tab */}
+          {isCommsOnly && (
+            <button
+              id="nav-tab-comms"
+              onClick={() => setActiveTab('comms')}
+              className="px-4 py-2 rounded-lg text-xs font-bold whitespace-nowrap bg-purple-600 text-white shadow-[0_0_15px_rgba(147,51,234,0.4)] flex items-center gap-2"
+            >
+              <Radio className="w-4 h-4 text-emerald-300" />
+              <span>Comms & Timeline</span>
+            </button>
+          )}
 
-          <button
-            id="nav-tab-presenter"
-            onClick={() => setActiveTab('presenter')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 ${
-              activeTab === 'presenter'
-                ? 'bg-purple-600 text-white shadow-[0_0_15px_rgba(147,51,234,0.4)]'
-                : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
-            }`}
-          >
-            <Clock className="w-3.5 h-3.5 text-amber-400" />
-            <span>3. Stage HUD</span>
-          </button>
+          {/* Directors and Class Admins */}
+          {!isTechOnly && !isPresenterOnly && !isCommsOnly && (
+            <>
+              {/* All Classes tab: STRICTLY DIRECTORS ONLY */}
+              {isDirector && (
+                <button
+                  id="nav-tab-all-classes"
+                  onClick={() => setActiveTab('all-classes')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 ${
+                    activeTab === 'all-classes'
+                      ? 'bg-purple-600 text-white shadow-[0_0_15px_rgba(147,51,234,0.4)]'
+                      : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                  }`}
+                >
+                  <Globe className="w-3.5 h-3.5 text-purple-400" />
+                  <span>0. All Classes</span>
+                </button>
+              )}
 
-          <button
-            id="nav-tab-team"
-            onClick={() => setActiveTab('team')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 ${
-              activeTab === 'team'
-                ? 'bg-purple-600 text-white shadow-[0_0_15px_rgba(147,51,234,0.4)]'
-                : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
-            }`}
-          >
-            <HeartHandshake className="w-3.5 h-3.5 text-purple-300" />
-            <span>4. Team</span>
-          </button>
+              <button
+                id="nav-tab-comms"
+                onClick={() => setActiveTab('comms')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 ${
+                  activeTab === 'comms'
+                    ? 'bg-purple-600 text-white shadow-[0_0_15px_rgba(147,51,234,0.4)]'
+                    : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                }`}
+              >
+                <Radio className="w-3.5 h-3.5 text-emerald-400" />
+                <span>1. Comms</span>
+              </button>
 
-          <button
-            id="nav-tab-planner"
-            onClick={() => setActiveTab('planner')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 ${
-              activeTab === 'planner'
-                ? 'bg-purple-600 text-white shadow-[0_0_15px_rgba(147,51,234,0.4)]'
-                : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
-            }`}
-          >
-            <CalendarDays className="w-3.5 h-3.5 text-indigo-400" />
-            <span>5. Planner</span>
-          </button>
+              <button
+                id="nav-tab-tech"
+                onClick={() => setActiveTab('tech')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 ${
+                  activeTab === 'tech'
+                    ? 'bg-purple-600 text-white shadow-[0_0_15px_rgba(147,51,234,0.4)]'
+                    : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                }`}
+              >
+                <Tv className="w-3.5 h-3.5 text-blue-400" />
+                <span>2. Tech</span>
+              </button>
 
-          <button
-            id="nav-tab-templates"
-            onClick={() => setActiveTab('templates')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 ${
-              activeTab === 'templates'
-                ? 'bg-purple-600 text-white shadow-[0_0_15px_rgba(147,51,234,0.4)]'
-                : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
-            }`}
-          >
-            <Layers className="w-3.5 h-3.5 text-purple-400" />
-            <span>6. Templates</span>
-          </button>
+              <button
+                id="nav-tab-presenter"
+                onClick={() => setActiveTab('presenter')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 ${
+                  activeTab === 'presenter'
+                    ? 'bg-purple-600 text-white shadow-[0_0_15px_rgba(147,51,234,0.4)]'
+                    : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                }`}
+              >
+                <Clock className="w-3.5 h-3.5 text-amber-400" />
+                <span>3. Stage HUD</span>
+              </button>
+
+              <button
+                id="nav-tab-team"
+                onClick={() => setActiveTab('team')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 ${
+                  activeTab === 'team'
+                    ? 'bg-purple-600 text-white shadow-[0_0_15px_rgba(147,51,234,0.4)]'
+                    : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                }`}
+              >
+                <HeartHandshake className="w-3.5 h-3.5 text-purple-300" />
+                <span>4. Team</span>
+              </button>
+
+              <button
+                id="nav-tab-planner"
+                onClick={() => setActiveTab('planner')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 ${
+                  activeTab === 'planner'
+                    ? 'bg-purple-600 text-white shadow-[0_0_15px_rgba(147,51,234,0.4)]'
+                    : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                }`}
+              >
+                <CalendarDays className="w-3.5 h-3.5 text-indigo-400" />
+                <span>5. Planner</span>
+              </button>
+
+              {/* Templates tab: ONLY Directors */}
+              {isDirector && (
+                <button
+                  id="nav-tab-templates"
+                  onClick={() => setActiveTab('templates')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 ${
+                    activeTab === 'templates'
+                      ? 'bg-purple-600 text-white shadow-[0_0_15px_rgba(147,51,234,0.4)]'
+                      : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                  }`}
+                >
+                  <Layers className="w-3.5 h-3.5 text-purple-400" />
+                  <span>6. Templates</span>
+                </button>
+              )}
+            </>
+          )}
         </div>
 
         {/* Right: Immersive Telemetry & System Clock & Auth */}
         <div className="flex items-center gap-2.5 justify-end">
           
-          {/* Holy Spirit Mode Trigger Button */}
-          <button
-            id="btn-holy-spirit-mode"
-            onClick={onOpenHolySpiritModal}
-            className="group relative px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-600 via-amber-500 to-yellow-500 text-slate-950 font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-amber-900/30 hover:brightness-110 active:scale-95 transition-all"
-          >
-            <Flame className="w-3.5 h-3.5 text-slate-950 fill-slate-950" />
-            <span className="hidden xl:inline">Holy Spirit</span>
-            <span className="xl:hidden">Spirit</span>
-          </button>
+          {/* Holy Spirit Mode Trigger Button (Hidden for Tech-only) */}
+          {!isTechOnly && (
+            <button
+              id="btn-holy-spirit-mode"
+              onClick={onOpenHolySpiritModal}
+              className="group relative px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-600 via-amber-500 to-yellow-500 text-slate-950 font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-amber-900/30 hover:brightness-110 active:scale-95 transition-all"
+            >
+              <Flame className="w-3.5 h-3.5 text-slate-950 fill-slate-950" />
+              <span className="hidden xl:inline">Holy Spirit</span>
+              <span className="xl:hidden">Spirit</span>
+            </button>
+          )}
 
           {/* Emergency Alert Badge */}
           {isEmergencyActive && (
@@ -366,15 +439,17 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           )}
 
-          {/* Quick Add Account Button */}
-          <button
-            onClick={() => onOpenAuthModal('register')}
-            title="Register a new volunteer account & assign class"
-            className="p-2 rounded-xl bg-[#161626] border border-white/5 text-purple-300 hover:text-white hover:border-purple-500/40 hover:bg-purple-600/20 transition-all flex items-center gap-1 text-xs font-semibold"
-          >
-            <UserPlus className="w-3.5 h-3.5 text-purple-400" />
-            <span className="hidden xl:inline text-[11px]">+ Account</span>
-          </button>
+          {/* Quick Add Account Button (Strictly Directors and Appointed Class Admins) */}
+          {canCreateAccounts && (
+            <button
+              onClick={() => onOpenAuthModal('register')}
+              title="Register a new volunteer account & assign class"
+              className="p-2 rounded-xl bg-[#161626] border border-white/5 text-purple-300 hover:text-white hover:border-purple-500/40 hover:bg-purple-600/20 transition-all flex items-center gap-1 text-xs font-semibold"
+            >
+              <UserPlus className="w-3.5 h-3.5 text-purple-400" />
+              <span className="hidden xl:inline text-[11px]">+ Account</span>
+            </button>
+          )}
 
           {/* Mobile Mockup Simulator View */}
           <button
@@ -398,15 +473,26 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
             <div className="text-left hidden sm:block">
               <div className="text-[11px] font-bold text-white group-hover:text-purple-300 transition-colors leading-tight truncate max-w-[90px]">
-                {currentUser?.name || 'Pastor Hope'}
+                {currentUser?.name || 'User'}
               </div>
               <div className="text-[8px] font-extrabold uppercase font-mono text-purple-400 leading-none mt-0.5">
-                {currentUser?.assignedClassId === 'all' 
+                {currentUser?.role === 'director' || (currentUser?.role === 'admin' && currentUser?.assignedClassId === 'all')
                   ? 'Director' 
-                  : currentUser?.assignedClassId ? currentUser.assignedClassId.toUpperCase() : currentUser?.role}
+                  : `${currentUser?.role || 'volunteer'} • ${currentUser?.assignedClassId || ''}`}
               </div>
             </div>
           </button>
+
+          {/* Quick Sign Out Button */}
+          {onLogout && (
+            <button
+              onClick={onLogout}
+              title="Sign Out"
+              className="p-2 rounded-xl bg-[#161626] border border-white/10 hover:border-red-500/50 hover:bg-red-500/10 text-gray-400 hover:text-red-400 transition-all flex items-center justify-center"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
     </header>

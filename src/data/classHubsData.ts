@@ -70,7 +70,7 @@ export const CLASSES_CONFIG: ClassInfo[] = [
     colorHex: '#f97316',
     grade: 'Pre-K & Grade R',
     ageGroup: '5-6 year olds',
-    room: 'Discovery Room A',
+    room: 'Discovery Wing A',
     themeBadge: 'bg-orange-500/20 text-orange-300 border-orange-500/40',
     accentBorder: 'border-orange-500/50',
     accentBg: 'bg-orange-600',
@@ -248,7 +248,7 @@ const LA_ORANGE_SEGMENTS: ServiceSegment[] = [
 const LA_ORANGE_CHECKLIST: PreServiceCheckItem[] = [
   { id: 'lao-chk-1', label: 'Safety Gate Latch', statusText: 'Locked & Checked', isChecked: true, category: 'hardware' },
   { id: 'lao-chk-2', label: 'Smart TV / Tablet Mirroring', statusText: 'Connected & Working', isChecked: true, category: 'media' },
-  { id: 'lao-chk-3', label: 'Bluetooth Classroom Speaker', statusText: 'Paired to iPad', isChecked: true, category: 'audio' },
+  { id: 'lao-chk-3', label: 'Bluetooth Class Speaker', statusText: 'Paired to iPad', isChecked: true, category: 'audio' },
   { id: 'lao-chk-4', label: 'Noah Ark Big Book & Plushies', statusText: 'Cleaned on Stage Rug', isChecked: true, category: 'general' },
   { id: 'lao-chk-5', label: 'Rainbow Sticker Packs (30 ct)', statusText: 'Counted on Tables', isChecked: true, category: 'general' },
   { id: 'lao-chk-6', label: 'Juice Boxes & Hand Wipes', statusText: 'Allergy Safe Checked', isChecked: true, category: 'general' },

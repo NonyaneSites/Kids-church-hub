@@ -974,7 +974,7 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
       title,
       message,
       senderRole: activeRole,
-      senderName: authUser.name || 'Central Command',
+      senderName: authUser?.name || 'Central Command',
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       priority,
       expiresAt: new Date(Date.now() + 25000).toISOString(),
@@ -996,7 +996,7 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
       } catch (e) {}
       return updated;
     });
-  }, [activeRole, authUser.name, dispatchBroadcast, playCueSound]);
+  }, [activeRole, authUser?.name, dispatchBroadcast, playCueSound]);
 
   const sendCueToClass = useCallback((classId: ClassId, type: QuickMessageType, customMessage?: string) => {
     const titles: Record<QuickMessageType, string> = {
@@ -1014,7 +1014,7 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
       title: titles[type] || 'Stage Cue',
       message: customMessage || 'Notice from control booth',
       senderRole: activeRole,
-      senderName: authUser.name || 'Booth',
+      senderName: authUser?.name || 'Booth',
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       priority: type === 'wrap_up' || type === 'finish' ? 'urgent' : 'normal',
       expiresAt: new Date(Date.now() + 20000).toISOString(),
@@ -1041,7 +1041,7 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
     });
 
     dispatchBroadcast('STAGE_CUE', newCue);
-  }, [activeRole, authUser.name, dispatchBroadcast, playCueSound, selectedClassId]);
+  }, [activeRole, authUser?.name, dispatchBroadcast, playCueSound, selectedClassId]);
 
   // Service Templates CRUD
   const createTemplate = useCallback((newTemplateData: Omit<ServiceTemplate, 'id' | 'createdAt' | 'updatedAt'>) => {
@@ -1143,7 +1143,7 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
   // Enhanced Incident Logger with Real-Time Broadcast & Alert Trigger
   const addIncident = useCallback(
     (description: string, severity: 'low' | 'medium' | 'critical' = 'low', customReportedBy?: string) => {
-      const reporter = customReportedBy || (authUser.name ? `${authUser.name} (${authUser.role.toUpperCase()})` : 'Tech Staff');
+      const reporter = customReportedBy || (authUser?.name ? `${authUser.name} (${authUser.role.toUpperCase()})` : 'Tech Staff');
       const newInc: IncidentLog = {
         id: `inc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -1217,14 +1217,14 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
   const addPrayerRequest = useCallback((text: string, category: 'team' | 'kids' | 'service' = 'team') => {
     const newReq: PrayerRequest = {
       id: `prayer_${Date.now()}`,
-      author: authUser.name || 'Team Leader',
+      author: authUser?.name || 'Team Leader',
       text,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       isAnswered: false,
       category,
     };
     setPrayerRequests((prev) => [newReq, ...prev]);
-  }, [authUser.name]);
+  }, [authUser?.name]);
 
   const updateReview = useCallback((review: Partial<ServiceReviewData>) => {
     setReviewData((prev) => ({

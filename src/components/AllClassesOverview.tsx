@@ -147,7 +147,7 @@ export const AllClassesOverview: React.FC<AllClassesOverviewProps> = ({
                 onChange={(e) => setTargetClassForCue(e.target.value as ClassId | 'all')}
                 className="w-full bg-black/50 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500 font-semibold"
               >
-                <option value="all">🌐 ALL 5 Classes (Global Multi-Room Broadcast)</option>
+                <option value="all">🌐 ALL 5 Classes (Global Network Broadcast)</option>
                 <option value="jy">🔵 Junior Youth (Blue Class, Gr 6-7)</option>
                 <option value="tb">🌸 TRAILBLAZERS (Pink Class, Gr 4-5)</option>
                 <option value="kb">🔴 Kingdom Builders (Red Class, Gr 1-3)</option>
@@ -263,7 +263,7 @@ export const AllClassesOverview: React.FC<AllClassesOverviewProps> = ({
                       {classInfo.name}
                     </h3>
                     <p className="text-[11px] text-gray-400 font-medium">
-                      {classInfo.room} • {classInfo.ageGroup}
+                      {classInfo.colorName} • {classInfo.ageGroup}
                     </p>
                   </div>
 
@@ -446,7 +446,7 @@ export const AllClassesOverview: React.FC<AllClassesOverviewProps> = ({
                 <span>Account & Duty Assignment</span>
               </div>
               <p className="text-gray-400 text-[11px] leading-relaxed">
-                Volunteers and teachers sign in with their assigned class to open their classroom hub automatically.
+                Volunteers and teachers sign in with their assigned class to open their dedicated class hub automatically.
               </p>
             </div>
             <button
