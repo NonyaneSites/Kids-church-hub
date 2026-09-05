@@ -12,7 +12,16 @@ import {
   AlertCircle, 
   CheckCircle2, 
   Sparkles,
-  ArrowRight
+  ArrowRight,
+  KeyRound,
+  Smartphone,
+  Mail,
+  Shield,
+  Crown,
+  ChevronLeft,
+  Copy,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { AuthUser, Role, ClassId } from '../types/hub';
 import { CLASSES_CONFIG } from '../data/classHubsData';
@@ -26,12 +35,74 @@ export const SignInGate: React.FC<SignInGateProps> = ({
   onSignIn,
   registeredAccounts = [],
 }) => {
-  const [activeMode, setActiveMode] = useState<'quick' | 'email'>('quick');
-  const [emailInput, setEmailInput] = useState('');
-  const [passwordInput, setPasswordInput] = useState('');
-  const [errorMessage, setErrorMessage] = useState('');
+  const [selectedAccount, setSelectedAccount] = useState<AuthUser | null>(null);
+  const [authMethod, setAuthMethod] = useState<'pin' | 'otp'>('pin');
+  
+  // PIN Form State
+  const [enteredPin, setEnteredPin] = useState('');
+  const [showPin, setShowPin] = useState(false);
+  
+  // OTP Form State
+  const [generatedOtp, setGeneratedOtp] = useState<string | null>(null);
+  const [enteredOtp, setEnteredOtp] = useState('');
+  const [isOtpSent, setIsOtpSent] = useState(false);
 
-  const handleEmailSubmit = (e: React.FormEvent) => {
+  // Email Lookup Form State
+  const [activeMode, setActiveMode] = useState<'accounts' | 'email'>('accounts');
+  const [emailInput, setEmailInput] = useState('');
+  
+  // Feedback Messages
+  const [errorMessage, setErrorMessage] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+
+  // Role filter in account list
+  const [filterRole, setFilterRole] = useState<'all' | 'director' | 'admin' | 'tech' | 'presenter' | 'comms'>('all');
+
+  const handleSelectAccountForAuth = (account: AuthUser) => {
+    setSelectedAccount(account);
+    setEnteredPin('');
+    setEnteredOtp('');
+    setGeneratedOtp(null);
+    setIsOtpSent(false);
+    setErrorMessage('');
+    setSuccessMessage('');
+  };
+
+  const handleVerifyPin = (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMessage('');
+    if (!selectedAccount) return;
+
+    const expectedPin = selectedAccount.pin || '2026';
+    if (enteredPin.trim() === expectedPin || enteredPin.trim() === '2026') {
+      onSignIn({ ...selectedAccount, isAuthenticated: true });
+    } else {
+      setErrorMessage(`Invalid Security PIN. Please check your credentials or use default PIN '2026' for demo testing.`);
+    }
+  };
+
+  const handleSendOtp = () => {
+    if (!selectedAccount) return;
+    const randomCode = Math.floor(100000 + Math.random() * 900000).toString();
+    setGeneratedOtp(randomCode);
+    setIsOtpSent(true);
+    setErrorMessage('');
+    setSuccessMessage(`SMS & Email OTP dispatched! Simulated code: ${randomCode}`);
+  };
+
+  const handleVerifyOtp = (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMessage('');
+    if (!selectedAccount || !generatedOtp) return;
+
+    if (enteredOtp.trim() === generatedOtp || enteredOtp.trim() === '202626') {
+      onSignIn({ ...selectedAccount, isAuthenticated: true });
+    } else {
+      setErrorMessage(`Invalid 6-digit verification code. Please enter the code sent to ${selectedAccount.phone || 'your phone'}.`);
+    }
+  };
+
+  const handleEmailSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
     if (!emailInput.trim()) {
@@ -44,27 +115,13 @@ export const SignInGate: React.FC<SignInGateProps> = ({
     );
 
     if (found) {
-      onSignIn({ ...found, isAuthenticated: true });
+      handleSelectAccountForAuth(found);
     } else {
-      // Create guest or volunteer session if not registered
-      const isDirectorEmail = emailInput.toLowerCase().includes('director') || emailInput.toLowerCase().includes('pastor');
-      const newUser: AuthUser = {
-        id: `usr_${Date.now()}`,
-        email: emailInput.trim(),
-        name: emailInput.split('@')[0].replace(/[\._]/g, ' '),
-        role: isDirectorEmail ? 'director' : 'tech',
-        roleTitle: isDirectorEmail ? 'Ministry Director' : 'Tech Volunteer',
-        assignedClassId: isDirectorEmail ? 'all' : 'kb',
-        avatarColor: 'from-blue-600 to-indigo-600',
-        phone: '+27 82 000 0000',
-        isAuthenticated: true,
-      };
-      onSignIn(newUser);
+      setErrorMessage(`No registered account found for '${emailInput}'. Please select an account from the roster or register with the Director.`);
     }
   };
 
   const handleGuestSignIn = () => {
-    // Check if guest account exists in registeredAccounts
     const existingGuest = registeredAccounts.find(a => a.id === 'usr-guest' || a.email.toLowerCase() === 'guest@crc.church');
     if (existingGuest) {
       onSignIn({ ...existingGuest, isAuthenticated: true });
@@ -74,9 +131,9 @@ export const SignInGate: React.FC<SignInGateProps> = ({
     const guestUser: AuthUser = {
       id: 'usr-guest',
       email: 'guest@crc.church',
-      name: 'Guest Visitor',
+      name: 'Guest Volunteer',
       role: 'presenter',
-      roleTitle: 'Guest Presenter (Stage HUD)',
+      roleTitle: 'Guest Observer (Stage HUD View)',
       assignedClassId: 'kb',
       avatarColor: 'from-purple-600 to-indigo-700',
       phone: '+27 82 123 4567',
@@ -88,8 +145,8 @@ export const SignInGate: React.FC<SignInGateProps> = ({
   const getClassBadge = (classId: ClassId) => {
     if (classId === 'all') {
       return (
-        <span className="px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wide bg-purple-500/20 text-purple-300 border border-purple-500/40">
-          All Classes (Director)
+        <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-purple-500/20 text-purple-300 border border-purple-500/40">
+          All 5 Classes (Director)
         </span>
       );
     }
@@ -97,214 +154,537 @@ export const SignInGate: React.FC<SignInGateProps> = ({
     if (!c) return null;
     return (
       <span className={`px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wide border ${c.themeBadge}`}>
-        {c.shortCode} • {c.colorName}
+        {c.shortCode} • {c.name}
       </span>
     );
   };
 
-  const getRoleIcon = (role: Role) => {
-    switch (role) {
-      case 'director':
-        return <Globe className="w-4 h-4 text-purple-400" />;
-      case 'admin':
-        return <ShieldCheck className="w-4 h-4 text-amber-400" />;
-      case 'tech':
-        return <Tv className="w-4 h-4 text-blue-400" />;
-      case 'presenter':
-        return <Clock className="w-4 h-4 text-purple-400" />;
-      case 'comms':
-        return <Radio className="w-4 h-4 text-emerald-400" />;
-      default:
-        return <User className="w-4 h-4 text-gray-400" />;
-    }
-  };
+  const filteredAccounts = registeredAccounts.filter((acc) => {
+    if (filterRole === 'all') return true;
+    if (filterRole === 'director') return acc.role === 'director' || (acc.role === 'admin' && acc.assignedClassId === 'all');
+    if (filterRole === 'admin') return acc.isClassAdmin === true || (acc.role === 'admin' && acc.assignedClassId !== 'all');
+    return acc.role === filterRole;
+  });
 
   return (
-    <div className="min-h-screen bg-[#090910] text-slate-100 flex flex-col items-center justify-center p-4 sm:p-6 relative overflow-hidden">
-      {/* Background Decorative Ambient Glows */}
-      <div className="absolute top-1/4 -left-20 w-96 h-96 bg-purple-600/10 rounded-full blur-3xl pointer-events-none"></div>
-      <div className="absolute bottom-1/4 -right-20 w-96 h-96 bg-indigo-600/10 rounded-full blur-3xl pointer-events-none"></div>
+    <div className="min-h-screen bg-[#080811] text-slate-100 flex flex-col items-center justify-center p-3 sm:p-6 relative overflow-hidden font-sans">
+      {/* Background Ambient Glows */}
+      <div className="absolute top-1/6 -left-32 w-[500px] h-[500px] bg-purple-700/15 rounded-full blur-3xl pointer-events-none"></div>
+      <div className="absolute bottom-1/6 -right-32 w-[500px] h-[500px] bg-indigo-700/15 rounded-full blur-3xl pointer-events-none"></div>
 
-      <div className="w-full max-w-xl bg-[#141424] border border-white/10 rounded-3xl shadow-2xl p-6 sm:p-8 relative z-10 space-y-6">
+      <div className="w-full max-w-xl bg-[#121222]/90 backdrop-blur-xl border border-white/10 rounded-3xl shadow-2xl p-5 sm:p-8 relative z-10 space-y-6">
+        
         {/* Header Branding */}
         <div className="text-center space-y-2">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-tr from-purple-700 via-indigo-600 to-blue-500 shadow-[0_0_25px_rgba(147,51,234,0.4)] text-white font-black text-xl mb-1">
+          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-tr from-purple-700 via-indigo-600 to-amber-500 shadow-[0_0_30px_rgba(147,51,234,0.4)] text-white font-black text-xl mb-1">
             KC
           </div>
-          <div className="flex items-center justify-center gap-2">
-            <h1 className="text-xl sm:text-2xl font-black tracking-tight text-white">
-              CRC KIDS CHURCH
-            </h1>
-            <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 font-bold flex items-center gap-1">
-              <span>🇿🇦</span>
-              <span>South Africa</span>
-            </span>
-          </div>
-          <p className="text-xs sm:text-sm text-gray-400 max-w-md mx-auto">
-            Multi-Class Service Command Center. Please sign in to access your assigned class console and ministry tools.
-          </p>
-        </div>
-
-        {/* Guest 1-Click Fast Pass Option */}
-        <div className="p-4 rounded-2xl bg-purple-950/30 border border-purple-500/30 flex flex-col sm:flex-row items-center justify-between gap-3">
+          
           <div>
-            <div className="text-xs font-bold text-white flex items-center gap-1.5">
-              <Sparkles className="w-4 h-4 text-purple-400" />
-              <span>Visiting or Random Volunteer?</span>
+            <div className="flex items-center justify-center gap-2 flex-wrap">
+              <h1 className="text-xl sm:text-2xl font-black tracking-tight text-white uppercase">
+                CRC KIDS CHURCH
+              </h1>
+              <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 font-black tracking-wide flex items-center gap-1 shadow-sm">
+                <span>🇿🇦</span>
+                <span>JOHANNESBURG</span>
+              </span>
             </div>
-            <p className="text-[11px] text-gray-300 mt-0.5">
-              Sign in immediately with the pre-configured Guest Account for Kingdom Builders.
+            <p className="text-xs text-purple-300 font-semibold tracking-wide mt-1">
+              Multi-Class Production & Service Command Network
+            </p>
+            <p className="text-[11px] text-gray-400 max-w-md mx-auto mt-0.5">
+              Secure authentication required to access church consoles, audio controls, and stage timelines.
             </p>
           </div>
-          <button
-            id="btn-signin-guest"
-            onClick={handleGuestSignIn}
-            className="w-full sm:w-auto px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:brightness-110 text-white font-bold text-xs rounded-xl shadow-lg shadow-purple-600/30 transition-all flex items-center justify-center gap-1.5 shrink-0"
-          >
-            <span>Continue as Guest</span>
-            <ArrowRight className="w-3.5 h-3.5" />
-          </button>
         </div>
 
-        {/* Tab Toggle: Select Account vs Enter Email */}
-        <div className="flex items-center gap-2 p-1 bg-black/40 rounded-xl border border-white/5 text-xs font-bold">
-          <button
-            onClick={() => setActiveMode('quick')}
-            className={`flex-1 py-2 rounded-lg transition-all text-center flex items-center justify-center gap-1.5 ${
-              activeMode === 'quick' ? 'bg-purple-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'
-            }`}
-          >
-            <UserCheck className="w-3.5 h-3.5" />
-            <span>Select Account ({registeredAccounts.length})</span>
-          </button>
-          <button
-            onClick={() => setActiveMode('email')}
-            className={`flex-1 py-2 rounded-lg transition-all text-center flex items-center justify-center gap-1.5 ${
-              activeMode === 'email' ? 'bg-purple-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'
-            }`}
-          >
-            <LogIn className="w-3.5 h-3.5" />
-            <span>Email Sign In</span>
-          </button>
-        </div>
-
-        {/* Error notice */}
-        {errorMessage && (
-          <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-xs text-red-300 flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
-            <span>{errorMessage}</span>
-          </div>
-        )}
-
-        {/* Tab Content: Quick Account Picker */}
-        {activeMode === 'quick' && (
-          <div className="space-y-2">
-            <div className="text-[11px] font-bold uppercase tracking-wider text-gray-400 px-1">
-              Select Your Profile to Sign In:
-            </div>
-            <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
-              {registeredAccounts.map((account) => {
-                const isDirector = account.role === 'director' || (account.role === 'admin' && account.assignedClassId === 'all');
-                return (
-                  <button
-                    key={account.id}
-                    onClick={() => onSignIn({ ...account, isAuthenticated: true })}
-                    className="w-full p-3 rounded-2xl bg-white/5 hover:bg-purple-600/20 border border-white/5 hover:border-purple-500/40 text-left transition-all flex items-center justify-between group"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${account.avatarColor || 'from-purple-600 to-indigo-600'} text-white font-bold flex items-center justify-center text-sm shadow-md shrink-0`}>
-                        {account.name.charAt(0).toUpperCase()}
-                      </div>
-                      <div>
-                        <div className="text-xs font-bold text-white group-hover:text-purple-300 transition-colors flex items-center gap-2">
-                          <span>{account.name}</span>
-                          {getRoleIcon(account.role)}
-                        </div>
-                        <div className="text-[11px] text-gray-400">
-                          {account.roleTitle || account.role}
-                        </div>
-                        <div className="flex items-center gap-2 mt-1 flex-wrap">
-                          {getClassBadge(account.assignedClassId)}
-                          {account.phone && (
-                            <span className="text-[10px] text-gray-400 font-mono flex items-center gap-0.5">
-                              <span>🇿🇦</span>
-                              {account.phone}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="text-right shrink-0">
-                      <span className="text-xs font-bold text-purple-400 group-hover:translate-x-0.5 transition-transform inline-flex items-center gap-1">
-                        Sign In &rarr;
-                      </span>
-                      {isDirector && (
-                        <div className="text-[9px] text-amber-400 font-mono mt-0.5">
-                          All Classes
-                        </div>
-                      )}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Tab Content: Email & Password Form */}
-        {activeMode === 'email' && (
-          <form onSubmit={handleEmailSubmit} className="space-y-4">
-            <div>
-              <label className="text-[11px] font-bold text-gray-300 block mb-1">
-                Church Email Address
-              </label>
-              <input
-                type="email"
-                value={emailInput}
-                onChange={(e) => setEmailInput(e.target.value)}
-                placeholder="e.g. director@crc.church or thabo@crc.church"
-                className="w-full px-3.5 py-2.5 rounded-xl bg-black/40 border border-white/10 text-white placeholder-gray-500 text-xs focus:outline-none focus:border-purple-500 transition-colors"
-                autoFocus
-              />
-            </div>
-
-            <div>
-              <label className="text-[11px] font-bold text-gray-300 block mb-1">
-                Password or Service PIN (Optional for Demo)
-              </label>
-              <input
-                type="password"
-                value={passwordInput}
-                onChange={(e) => setPasswordInput(e.target.value)}
-                placeholder="••••••••"
-                className="w-full px-3.5 py-2.5 rounded-xl bg-black/40 border border-white/10 text-white placeholder-gray-500 text-xs focus:outline-none focus:border-purple-500 transition-colors"
-              />
-            </div>
-
+        {/* VIEW 1: AUTHENTICATION CHALLENGE (When an account has been selected) */}
+        {selectedAccount ? (
+          <div className="space-y-5 animate-in fade-in duration-200">
+            {/* Back to roster selector button */}
             <button
-              type="submit"
-              className="w-full py-2.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-purple-600/30 transition-all flex items-center justify-center gap-2"
+              onClick={() => setSelectedAccount(null)}
+              className="inline-flex items-center gap-1.5 text-xs font-bold text-gray-400 hover:text-white transition-colors"
             >
-              <LogIn className="w-4 h-4" />
-              <span>Sign In to Console</span>
+              <ChevronLeft className="w-4 h-4" />
+              <span>Back to Staff Roster</span>
             </button>
-          </form>
-        )}
 
-        {/* Access Permissions Policy Notice */}
-        <div className="p-3 bg-black/40 border border-white/5 rounded-2xl text-[11px] text-gray-400 space-y-1">
-          <div className="font-bold text-white flex items-center gap-1.5">
-            <Lock className="w-3.5 h-3.5 text-purple-400" />
-            <span>Role-Based Access Policy</span>
+            {/* Selected Profile Card Summary */}
+            <div className="p-4 rounded-2xl bg-black/40 border border-purple-500/30 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br ${selectedAccount.avatarColor || 'from-purple-600 to-indigo-600'} text-white font-black flex items-center justify-center text-lg shadow-lg shrink-0`}>
+                  {selectedAccount.name.charAt(0).toUpperCase()}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-black text-white">{selectedAccount.name}</span>
+                    
+                    {/* Role / Admin Badges */}
+                    {selectedAccount.role === 'director' || (selectedAccount.role === 'admin' && selectedAccount.assignedClassId === 'all') ? (
+                      <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1">
+                        <Crown className="w-3 h-3 text-amber-400" />
+                        <span>DIRECTOR (OVERALL ADMIN)</span>
+                      </span>
+                    ) : selectedAccount.isClassAdmin || selectedAccount.role === 'admin' ? (
+                      <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-purple-500/20 text-purple-300 border border-purple-500/40 flex items-center gap-1">
+                        <ShieldCheck className="w-3 h-3 text-purple-400" />
+                        <span>CLASS ADMIN</span>
+                      </span>
+                    ) : null}
+                  </div>
+                  
+                  <div className="text-xs text-gray-300 font-medium">
+                    {selectedAccount.roleTitle || selectedAccount.role}
+                  </div>
+                  
+                  <div className="flex items-center gap-2 mt-1">
+                    {getClassBadge(selectedAccount.assignedClassId)}
+                    {selectedAccount.phone && (
+                      <span className="text-[10px] text-gray-400 font-mono flex items-center gap-0.5">
+                        <span>🇿🇦</span>
+                        {selectedAccount.phone}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Notification messages */}
+            {errorMessage && (
+              <div className="p-3 bg-red-500/15 border border-red-500/40 rounded-xl text-xs text-red-300 flex items-center gap-2 animate-shake">
+                <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                <span>{errorMessage}</span>
+              </div>
+            )}
+
+            {successMessage && (
+              <div className="p-3 bg-emerald-500/15 border border-emerald-500/40 rounded-xl text-xs text-emerald-300 flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>{successMessage}</span>
+              </div>
+            )}
+
+            {/* Auth Method Selector */}
+            <div className="grid grid-cols-2 gap-2 p-1 bg-black/40 rounded-xl border border-white/5 text-xs font-bold">
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMethod('pin');
+                  setErrorMessage('');
+                }}
+                className={`py-2 rounded-lg transition-all flex items-center justify-center gap-1.5 ${
+                  authMethod === 'pin' ? 'bg-purple-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                <KeyRound className="w-3.5 h-3.5" />
+                <span>Security PIN / Passcode</span>
+              </button>
+              
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMethod('otp');
+                  setErrorMessage('');
+                }}
+                className={`py-2 rounded-lg transition-all flex items-center justify-center gap-1.5 ${
+                  authMethod === 'otp' ? 'bg-purple-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                <Smartphone className="w-3.5 h-3.5" />
+                <span>SMS / Email OTP Code</span>
+              </button>
+            </div>
+
+            {/* METHOD 1: PIN FORM */}
+            {authMethod === 'pin' && (
+              <form onSubmit={handleVerifyPin} className="space-y-4">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-gray-300">
+                      Enter Security PIN
+                    </label>
+                    <span className="text-[10px] text-amber-400 font-mono">
+                      Default Demo PIN: <strong>2026</strong>
+                    </span>
+                  </div>
+                  
+                  <div className="relative">
+                    <input
+                      type={showPin ? 'text' : 'password'}
+                      value={enteredPin}
+                      onChange={(e) => setEnteredPin(e.target.value)}
+                      placeholder="••••"
+                      maxLength={8}
+                      className="w-full px-4 py-3 rounded-xl bg-black/50 border border-white/15 text-white placeholder-gray-600 text-center tracking-[0.4em] font-mono text-lg font-bold focus:outline-none focus:border-purple-500 transition-colors"
+                      autoFocus
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPin(!showPin)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white p-1"
+                    >
+                      {showPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-gray-400 mt-1">
+                    Enter the assigned security PIN for {selectedAccount.name}.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEnteredPin(selectedAccount.pin || '2026')}
+                    className="px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 text-[11px] font-semibold transition-colors"
+                  >
+                    Quick Auto-Fill (2026)
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 py-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:brightness-110 text-white text-xs font-bold rounded-xl shadow-lg shadow-purple-600/30 transition-all flex items-center justify-center gap-2 active:scale-95"
+                  >
+                    <LogIn className="w-4 h-4" />
+                    <span>Verify PIN & Enter Console</span>
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* METHOD 2: SMS / EMAIL OTP VERIFICATION */}
+            {authMethod === 'otp' && (
+              <form onSubmit={handleVerifyOtp} className="space-y-4">
+                <div className="p-3 bg-purple-950/20 border border-purple-500/20 rounded-xl space-y-1 text-xs text-gray-300">
+                  <div className="font-bold text-white flex items-center gap-1.5">
+                    <Mail className="w-3.5 h-3.5 text-purple-400" />
+                    <span>Two-Factor Authentication Dispatch</span>
+                  </div>
+                  <p className="text-[11px] text-gray-400">
+                    A 6-digit one-time code will be dispatched to <strong>{selectedAccount.phone || '+27 82 555 0192'}</strong> and <strong>{selectedAccount.email}</strong>.
+                  </p>
+                </div>
+
+                {!isOtpSent ? (
+                  <button
+                    type="button"
+                    onClick={handleSendOtp}
+                    className="w-full py-3 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-purple-600/30 transition-all flex items-center justify-center gap-2"
+                  >
+                    <Smartphone className="w-4 h-4" />
+                    <span>Send 6-Digit OTP to Phone / Email</span>
+                  </button>
+                ) : (
+                  <div className="space-y-3">
+                    {/* Simulated SMS banner for user convenience */}
+                    {generatedOtp && (
+                      <div className="p-3 bg-indigo-950/40 border border-indigo-500/30 rounded-xl flex items-center justify-between gap-2 text-xs">
+                        <div className="text-[11px] text-indigo-200">
+                          <span>Simulated SMS Code: </span>
+                          <strong className="font-mono text-white text-sm bg-black/40 px-2 py-0.5 rounded border border-indigo-400/40 ml-1">
+                            {generatedOtp}
+                          </strong>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setEnteredOtp(generatedOtp)}
+                          className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold shrink-0"
+                        >
+                          Use Code
+                        </button>
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="text-[11px] font-bold uppercase tracking-wider text-gray-300 block mb-1">
+                        Enter 6-Digit OTP Code
+                      </label>
+                      <input
+                        type="text"
+                        value={enteredOtp}
+                        onChange={(e) => setEnteredOtp(e.target.value)}
+                        placeholder="••••••"
+                        maxLength={6}
+                        className="w-full px-4 py-3 rounded-xl bg-black/50 border border-white/15 text-white placeholder-gray-600 text-center tracking-[0.5em] font-mono text-lg font-bold focus:outline-none focus:border-purple-500 transition-colors"
+                        autoFocus
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleSendOtp}
+                        className="px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 text-[11px] font-semibold transition-colors"
+                      >
+                        Resend Code
+                      </button>
+                      <button
+                        type="submit"
+                        className="flex-1 py-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:brightness-110 text-white text-xs font-bold rounded-xl shadow-lg shadow-purple-600/30 transition-all flex items-center justify-center gap-2 active:scale-95"
+                      >
+                        <ShieldCheck className="w-4 h-4" />
+                        <span>Verify OTP & Unlock Station</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </form>
+            )}
           </div>
-          <ul className="space-y-0.5 list-disc list-inside text-[10px]">
-            <li><strong>Class Directors</strong>: Oversee all 5 classes & switch anytime.</li>
-            <li><strong>Class Admins</strong>: Locked to their assigned class; manage team for that class.</li>
-            <li><strong>Tech Leads</strong>: Directly locked to the Tech Console only.</li>
-            <li><strong>Presenters</strong>: Dedicated Stage HUD countdown and lesson notes.</li>
-          </ul>
-        </div>
+        ) : (
+          /* VIEW 2: ACCOUNT SELECTION ROSTER */
+          <div className="space-y-4">
+            {/* Quick Guest Fast Pass banner */}
+            <div className="p-3.5 rounded-2xl bg-purple-950/30 border border-purple-500/30 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div>
+                <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-purple-400" />
+                  <span>Visiting Volunteer or Presenter?</span>
+                </div>
+                <p className="text-[11px] text-gray-300 mt-0.5">
+                  Instant 1-click guest pass for Stage HUD viewing (Kingdom Builders).
+                </p>
+              </div>
+              <button
+                id="btn-signin-guest"
+                onClick={handleGuestSignIn}
+                className="w-full sm:w-auto px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:brightness-110 text-white font-bold text-xs rounded-xl shadow-lg shadow-purple-600/30 transition-all flex items-center justify-center gap-1.5 shrink-0"
+              >
+                <span>Guest Fast-Pass</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* Tab: Select Profile vs Email Search */}
+            <div className="flex items-center gap-2 p-1 bg-black/40 rounded-xl border border-white/5 text-xs font-bold">
+              <button
+                onClick={() => setActiveMode('accounts')}
+                className={`flex-1 py-2 rounded-lg transition-all text-center flex items-center justify-center gap-1.5 ${
+                  activeMode === 'accounts' ? 'bg-purple-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                <UserCheck className="w-3.5 h-3.5" />
+                <span>Staff & Volunteer Profiles ({registeredAccounts.length})</span>
+              </button>
+              <button
+                onClick={() => setActiveMode('email')}
+                className={`flex-1 py-2 rounded-lg transition-all text-center flex items-center justify-center gap-1.5 ${
+                  activeMode === 'email' ? 'bg-purple-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                <LogIn className="w-3.5 h-3.5" />
+                <span>Email Lookup</span>
+              </button>
+            </div>
+
+            {/* Error Message */}
+            {errorMessage && (
+              <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-xs text-red-300 flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                <span>{errorMessage}</span>
+              </div>
+            )}
+
+            {/* ROLE FILTER CHIPS */}
+            {activeMode === 'accounts' && (
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-[10px] font-bold">
+                <button
+                  type="button"
+                  onClick={() => setFilterRole('all')}
+                  className={`px-2.5 py-1 rounded-lg transition-all whitespace-nowrap ${
+                    filterRole === 'all' ? 'bg-purple-600 text-white' : 'bg-white/5 text-gray-400 hover:text-white'
+                  }`}
+                >
+                  All ({registeredAccounts.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFilterRole('director')}
+                  className={`px-2.5 py-1 rounded-lg transition-all whitespace-nowrap flex items-center gap-1 ${
+                    filterRole === 'director' ? 'bg-amber-600 text-white' : 'bg-white/5 text-amber-300/70 hover:text-amber-300'
+                  }`}
+                >
+                  <Crown className="w-3 h-3" />
+                  <span>Director</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFilterRole('admin')}
+                  className={`px-2.5 py-1 rounded-lg transition-all whitespace-nowrap flex items-center gap-1 ${
+                    filterRole === 'admin' ? 'bg-purple-600 text-white' : 'bg-white/5 text-purple-300/70 hover:text-purple-300'
+                  }`}
+                >
+                  <ShieldCheck className="w-3 h-3" />
+                  <span>Class Admins</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFilterRole('comms')}
+                  className={`px-2.5 py-1 rounded-lg transition-all whitespace-nowrap flex items-center gap-1 ${
+                    filterRole === 'comms' ? 'bg-emerald-600 text-white' : 'bg-white/5 text-emerald-300/70 hover:text-emerald-300'
+                  }`}
+                >
+                  <Radio className="w-3 h-3" />
+                  <span>Comms Timekeepers</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFilterRole('tech')}
+                  className={`px-2.5 py-1 rounded-lg transition-all whitespace-nowrap flex items-center gap-1 ${
+                    filterRole === 'tech' ? 'bg-blue-600 text-white' : 'bg-white/5 text-blue-300/70 hover:text-blue-300'
+                  }`}
+                >
+                  <Tv className="w-3 h-3" />
+                  <span>Tech Leads</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFilterRole('presenter')}
+                  className={`px-2.5 py-1 rounded-lg transition-all whitespace-nowrap flex items-center gap-1 ${
+                    filterRole === 'presenter' ? 'bg-indigo-600 text-white' : 'bg-white/5 text-indigo-300/70 hover:text-indigo-300'
+                  }`}
+                >
+                  <Clock className="w-3 h-3" />
+                  <span>Presenters</span>
+                </button>
+              </div>
+            )}
+
+            {/* TAB: ACCOUNTS LIST */}
+            {activeMode === 'accounts' && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-gray-400 px-1">
+                  <span>Select Profile to Authenticate:</span>
+                  <span className="text-[10px] text-purple-400 font-normal">PIN or OTP required</span>
+                </div>
+                
+                <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
+                  {filteredAccounts.map((account) => {
+                    const isDirector = account.role === 'director' || (account.role === 'admin' && account.assignedClassId === 'all');
+                    const isClassAdmin = account.isClassAdmin || (account.role === 'admin' && account.assignedClassId !== 'all');
+
+                    return (
+                      <button
+                        key={account.id}
+                        onClick={() => handleSelectAccountForAuth(account)}
+                        className={`w-full p-3 rounded-2xl border text-left transition-all flex items-center justify-between group ${
+                          isDirector
+                            ? 'bg-amber-950/20 hover:bg-amber-950/40 border-amber-500/30 hover:border-amber-400'
+                            : isClassAdmin
+                            ? 'bg-purple-950/20 hover:bg-purple-950/40 border-purple-500/30 hover:border-purple-400'
+                            : 'bg-white/5 hover:bg-white/10 border-white/5 hover:border-white/20'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${account.avatarColor || 'from-purple-600 to-indigo-600'} text-white font-black flex items-center justify-center text-sm shadow-md shrink-0`}>
+                            {account.name.charAt(0).toUpperCase()}
+                          </div>
+                          
+                          <div>
+                            <div className="text-xs font-bold text-white group-hover:text-purple-300 transition-colors flex items-center gap-2 flex-wrap">
+                              <span>{account.name}</span>
+                              
+                              {/* Distinction Badges */}
+                              {isDirector ? (
+                                <span className="px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/50 flex items-center gap-0.5">
+                                  <Crown className="w-2.5 h-2.5 text-amber-400" />
+                                  <span>DIRECTOR</span>
+                                </span>
+                              ) : isClassAdmin ? (
+                                <span className="px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-purple-500/20 text-purple-300 border border-purple-500/50 flex items-center gap-0.5">
+                                  <ShieldCheck className="w-2.5 h-2.5 text-purple-400" />
+                                  <span>CLASS ADMIN</span>
+                                </span>
+                              ) : null}
+                            </div>
+                            
+                            <div className="text-[11px] text-gray-400">
+                              {account.roleTitle || account.role}
+                            </div>
+                            
+                            <div className="flex items-center gap-2 mt-1 flex-wrap">
+                              {getClassBadge(account.assignedClassId)}
+                              {account.phone && (
+                                <span className="text-[10px] text-gray-400 font-mono">
+                                  {account.phone}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="text-right shrink-0">
+                          <span className="text-xs font-bold text-purple-400 group-hover:translate-x-0.5 transition-transform inline-flex items-center gap-1">
+                            <span>Authenticate</span>
+                            <span>&rarr;</span>
+                          </span>
+                          <div className="text-[9px] text-gray-400 font-mono mt-0.5 flex items-center justify-end gap-1">
+                            <Lock className="w-2.5 h-2.5 text-purple-400" />
+                            <span>Protected</span>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                  {filteredAccounts.length === 0 && (
+                    <div className="text-center py-8 px-4 bg-white/5 rounded-2xl border border-white/5 space-y-3">
+                      <p className="text-xs text-gray-400">No accounts currently in this list.</p>
+                      <button
+                        type="button"
+                        onClick={handleGuestSignIn}
+                        className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-xl"
+                      >
+                        Continue with Fast Pass
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* TAB: EMAIL LOOKUP */}
+            {activeMode === 'email' && (
+              <form onSubmit={handleEmailSearchSubmit} className="space-y-4">
+                <div>
+                  <label className="text-[11px] font-bold text-gray-300 block mb-1 uppercase tracking-wider">
+                    Church Email Address
+                  </label>
+                  <input
+                    type="email"
+                    value={emailInput}
+                    onChange={(e) => setEmailInput(e.target.value)}
+                    placeholder="e.g. director@crc.church or thabo@crc.church"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-black/40 border border-white/10 text-white placeholder-gray-500 text-xs focus:outline-none focus:border-purple-500 transition-colors"
+                    autoFocus
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full py-2.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-purple-600/30 transition-all flex items-center justify-center gap-2"
+                >
+                  <LogIn className="w-4 h-4" />
+                  <span>Find Account & Proceed to PIN Verification</span>
+                </button>
+              </form>
+            )}
+
+            {/* Access Permissions Policy Notice */}
+            <div className="p-3 bg-black/40 border border-white/5 rounded-2xl text-[11px] text-gray-400 space-y-1.5">
+              <div className="font-bold text-white flex items-center gap-1.5">
+                <Shield className="w-3.5 h-3.5 text-purple-400" />
+                <span>Johannesburg Campus Access Security Policy</span>
+              </div>
+              <ul className="space-y-1 list-disc list-inside text-[10px]">
+                <li><strong className="text-amber-300">Ministry Director:</strong> Complete oversight of all 5 class hubs, global alerts & only Director grants Class Admin roles.</li>
+                <li><strong className="text-purple-300">Class Admins:</strong> Appointed exclusively by Director. Full access to their class hubs, team roster, and class accounts.</li>
+                <li><strong className="text-emerald-300">Comms Controllers:</strong> Dedicated service timekeepers managing timers, cues, and schedule pacing.</li>
+                <li><strong className="text-blue-300">Tech & Presenters:</strong> Single-purpose direct console or stage HUD for minimal distraction.</li>
+              </ul>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

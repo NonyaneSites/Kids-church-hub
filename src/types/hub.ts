@@ -194,7 +194,22 @@ export interface AuthUser {
   avatarColor: string;
   phone?: string;
   whatsapp?: string;
+  pin?: string; // 4-6 digit security PIN or password for secure authentication
+  isClassAdmin?: boolean; // Granted exclusively by Director
+  isAdminPromotedBy?: string;
   isAuthenticated: boolean;
+}
+
+export interface DirectorAnnouncement {
+  id: string;
+  title: string;
+  message: string;
+  senderName: string;
+  senderRoleTitle: string;
+  targetClassId: ClassId | 'all';
+  timestamp: string;
+  severity: 'normal' | 'important' | 'emergency';
+  expiresAt?: string;
 }
 
 export interface ClassHubData {
@@ -256,8 +271,13 @@ export interface BroadcastChannelEvent<T = unknown> {
     | 'NOTIFICATION'
     | 'INCIDENT_ADDED'
     | 'SERVICE_TEMPLATES_UPDATE'
-    | 'AUTH_USER_CHANGE';
+    | 'AUTH_USER_CHANGE'
+    | 'DIRECTOR_ANNOUNCEMENT';
   payload: T;
   sentAt: string;
   senderId: string;
 }
+
+// Convenient aliases
+export type ChecklistItem = PreServiceCheckItem;
+export type IncidentItem = IncidentLog;

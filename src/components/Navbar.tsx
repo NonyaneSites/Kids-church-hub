@@ -18,7 +18,9 @@ import {
   Globe,
   UserPlus,
   Check,
-  LogOut
+  LogOut,
+  Megaphone,
+  Crown
 } from 'lucide-react';
 import { Role, ServiceSegment, AuthUser, ClassId, ClassInfo } from '../types/hub';
 import { CLASSES_CONFIG } from '../data/classHubsData';
@@ -39,6 +41,9 @@ interface NavbarProps {
   selectedClassId: ClassId;
   onSelectClass: (classId: ClassId) => void;
   allClasses: ClassInfo[];
+  onOpenDirectorAnnouncement?: () => void;
+  isMobileMode?: boolean;
+  onToggleMobileMode?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -57,6 +62,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   selectedClassId,
   onSelectClass,
   allClasses,
+  onOpenDirectorAnnouncement,
+  isMobileMode,
+  onToggleMobileMode,
 }) => {
   const [systemTime, setSystemTime] = useState<string>('');
   const [isClassDropdownOpen, setIsClassDropdownOpen] = useState<boolean>(false);
@@ -91,7 +99,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   }, []);
 
   const isDirector = currentUser?.role === 'director' || (currentUser?.role === 'admin' && currentUser?.assignedClassId === 'all');
-  const isClassAdmin = currentUser?.role === 'admin' && currentUser?.assignedClassId !== 'all';
+  const isClassAdmin = Boolean(currentUser?.isClassAdmin) || (currentUser?.role === 'admin' && currentUser?.assignedClassId !== 'all');
   const canCreateAccounts = isDirector || isClassAdmin;
   const isTechOnly = currentUser?.role === 'tech';
   const isPresenterOnly = currentUser?.role === 'presenter';
@@ -127,17 +135,16 @@ export const Navbar: React.FC<NavbarProps> = ({
               KC
             </div>
             <div>
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1.5 flex-wrap">
                 <h1 className="text-base font-extrabold tracking-tight text-white flex items-center gap-1">
-                  KIDS CHURCH <span className="text-purple-400">HUBS</span>
+                  CRC KIDS CHURCH <span className="text-purple-400">HUBS</span>
                 </h1>
-                <div className="hidden sm:flex px-2 py-0.2 rounded-full border border-green-500/30 bg-green-500/10 items-center gap-1">
-                  <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></div>
-                  <span className="text-[9px] font-bold text-green-400 uppercase tracking-wider">Live</span>
+                <div className="flex px-2 py-0.5 rounded-full border border-amber-500/40 bg-amber-500/15 items-center gap-1">
+                  <span className="text-[10px] font-extrabold text-amber-300 uppercase tracking-wide">🇿🇦 Johannesburg</span>
                 </div>
               </div>
               <p className="text-[10px] text-gray-400 font-medium">
-                CRC Dream Week • Multi-Class Command
+                Campus Production Command • All 5 Classes
               </p>
             </div>
           </div>
@@ -414,6 +421,18 @@ export const Navbar: React.FC<NavbarProps> = ({
         {/* Right: Immersive Telemetry & System Clock & Auth */}
         <div className="flex items-center gap-2.5 justify-end">
           
+          {/* Director Global Broadcast Announcement Button */}
+          {isDirector && onOpenDirectorAnnouncement && (
+            <button
+              onClick={onOpenDirectorAnnouncement}
+              title="Broadcast Director Alert to all 5 classes"
+              className="px-2.5 py-1.5 rounded-xl bg-purple-600/30 hover:bg-purple-600 border border-purple-500/40 text-purple-200 hover:text-white font-bold text-xs flex items-center gap-1.5 transition-all shadow-sm"
+            >
+              <Megaphone className="w-3.5 h-3.5 text-purple-300 animate-pulse" />
+              <span className="hidden xl:inline">Broadcast Alert</span>
+            </button>
+          )}
+
           {/* Holy Spirit Mode Trigger Button (Hidden for Tech-only) */}
           {!isTechOnly && (
             <button
@@ -451,14 +470,21 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           )}
 
-          {/* Mobile Mockup Simulator View */}
+          {/* Mobile Phone Mode Switcher Button */}
           <button
             id="btn-mobile-simulator"
-            onClick={onOpenMobileSimulator}
-            title="Preview Mobile Handheld Screens"
-            className="p-2 rounded-xl bg-[#161626] border border-white/5 text-gray-300 hover:text-purple-300 hover:border-purple-500/40 transition-all text-xs font-semibold"
+            onClick={onToggleMobileMode || onOpenMobileSimulator}
+            title={isMobileMode ? "Switch to Full Desktop View" : "Switch to Mobile Phone View"}
+            className={`px-2.5 py-1.5 rounded-xl border transition-all text-xs font-bold flex items-center gap-1.5 shadow-sm active:scale-95 ${
+              isMobileMode
+                ? 'bg-purple-600 text-white border-purple-500 shadow-purple-600/30'
+                : 'bg-[#161626] border-white/5 text-purple-300 hover:text-white hover:border-purple-500/40 hover:bg-purple-600/20'
+            }`}
           >
             <Smartphone className="w-3.5 h-3.5 text-purple-400" />
+            <span className="hidden sm:inline text-[11px]">
+              {isMobileMode ? 'Phone Mode' : 'Phone View'}
+            </span>
           </button>
 
           {/* Authenticated User Pill Button */}

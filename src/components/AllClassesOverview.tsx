@@ -34,6 +34,7 @@ interface AllClassesOverviewProps {
   onSendCueToClass?: (classId: ClassId, type: QuickMessageType, message: string) => void;
   currentUser?: AuthUser;
   onOpenAuthModal?: () => void;
+  onOpenDirectorAnnouncement?: () => void;
 }
 
 export const AllClassesOverview: React.FC<AllClassesOverviewProps> = ({
@@ -49,6 +50,7 @@ export const AllClassesOverview: React.FC<AllClassesOverviewProps> = ({
   onSendCueToClass,
   currentUser,
   onOpenAuthModal,
+  onOpenDirectorAnnouncement,
 }) => {
   const defaultHubs = getAllDefaultClassHubs();
   const safeHubs = allClassHubs || hubsData || defaultHubs;
@@ -105,6 +107,9 @@ export const AllClassesOverview: React.FC<AllClassesOverviewProps> = ({
               <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-purple-500/20 text-purple-300 border border-purple-500/40">
                 Central Overseer Console
               </span>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wide bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                🇿🇦 CRC KIDS CHURCH JOHANNESBURG
+              </span>
               <span className="text-xs text-gray-400 font-mono flex items-center gap-1">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
                 5 Classes Live & Synchronized
@@ -114,11 +119,21 @@ export const AllClassesOverview: React.FC<AllClassesOverviewProps> = ({
               All Classes Master Dashboard
             </h2>
             <p className="text-xs sm:text-sm text-gray-400 mt-1 max-w-2xl">
-              Real-time monitoring across Junior Youth, TRAILBLAZERS, Kingdom Builders, Little Adventures Orange, and Little Adventures Yellow.
+              Real-time monitoring across Junior Youth, TRAILBLAZERS, Kingdom Builders, Little Adventures Orange, and Little Adventures Yellow in Johannesburg.
             </p>
           </div>
 
           <div className="flex items-center gap-2.5 flex-wrap">
+            {onOpenDirectorAnnouncement && (
+              <button
+                onClick={onOpenDirectorAnnouncement}
+                className="px-3.5 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-500 text-white transition-all shadow-lg shadow-amber-600/30 flex items-center gap-2"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>Director Announcement (Pop-up)</span>
+              </button>
+            )}
+
             <button
               onClick={() => setShowGlobalBroadcastForm(!showGlobalBroadcastForm)}
               className="px-3.5 py-2 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white transition-all shadow-lg shadow-purple-600/30 flex items-center gap-2"

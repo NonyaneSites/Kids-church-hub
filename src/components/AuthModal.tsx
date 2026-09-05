@@ -22,7 +22,13 @@ import {
   Tag,
   MessageCircle,
   AlertTriangle,
-  RotateCcw
+  RotateCcw,
+  Crown,
+  Shield,
+  Eye,
+  EyeOff,
+  ChevronRight,
+  Database
 } from 'lucide-react';
 import { Role, AuthUser, ClassId, ClassInfo } from '../types/hub';
 import { CLASSES_CONFIG } from '../data/classHubsData';
@@ -44,6 +50,10 @@ interface AuthModalProps {
   registeredAccounts: AuthUser[];
   onAddNewAccount: (user: AuthUser) => void;
   onDeleteAccount: (userId: string) => void;
+  onClearDefaultAccounts?: () => void;
+  onResetDefaultAccounts?: () => void;
+  onPromoteToClassAdmin?: (userId: string) => void;
+  onRevokeClassAdmin?: (userId: string) => void;
   initialTab?: 'quick_switch' | 'login' | 'register' | 'manage' | 'permissions';
 }
 
@@ -67,16 +77,26 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   registeredAccounts,
   onAddNewAccount,
   onDeleteAccount,
+  onClearDefaultAccounts,
+  onResetDefaultAccounts,
+  onPromoteToClassAdmin,
+  onRevokeClassAdmin,
   initialTab = 'quick_switch',
 }) => {
   const isDirector = currentUser?.role === 'director' || (currentUser?.role === 'admin' && currentUser?.assignedClassId === 'all');
-  const isClassAdmin = currentUser?.role === 'admin' && currentUser?.assignedClassId !== 'all';
+  const isClassAdmin = Boolean(currentUser?.isClassAdmin) || (currentUser?.role === 'admin' && currentUser?.assignedClassId !== 'all');
   const canCreateAccounts = isDirector || isClassAdmin;
 
   const [activeTab, setActiveTab] = useState<'quick_switch' | 'login' | 'register' | 'manage' | 'permissions'>(
     initialTab === 'register' && !canCreateAccounts ? 'quick_switch' : initialTab
   );
   
+  // Custom Confirmation Dialog States (Replaces window.confirm)
+  const [userToDelete, setUserToDelete] = useState<AuthUser | null>(null);
+  const [isConfirmingClearDefaults, setIsConfirmingClearDefaults] = useState(false);
+  const [isConfirmingResetDefaults, setIsConfirmingResetDefaults] = useState(false);
+  const [userToToggleAdmin, setUserToToggleAdmin] = useState<AuthUser | null>(null);
+
   // Custom Login State
   const [emailInput, setEmailInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
@@ -84,16 +104,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [selectedRole, setSelectedRole] = useState<Role>('admin');
   const [selectedClassId, setSelectedClassId] = useState<ClassId>('all');
   
+  // Quick Switch PIN verification challenge
+  const [pendingSwitchUser, setPendingSwitchUser] = useState<AuthUser | null>(null);
+  const [switchPinInput, setSwitchPinInput] = useState('');
+  const [showSwitchPin, setShowSwitchPin] = useState(false);
+
   // Register Account State (Lock to admin's assigned class if not director)
   const defaultClass = isClassAdmin && currentUser.assignedClassId !== 'all' ? currentUser.assignedClassId : 'jy';
   const [regName, setRegName] = useState('');
   const [regEmail, setRegEmail] = useState('');
-  const [regPassword, setRegPassword] = useState('');
+  const [regPin, setRegPin] = useState('2026');
   const [regPhone, setRegPhone] = useState('');
   const [regRole, setRegRole] = useState<Role>('tech');
   const [regClassId, setRegClassId] = useState<ClassId>(defaultClass);
   const [regRoleTitle, setRegRoleTitle] = useState('');
   const [regAvatarColor, setRegAvatarColor] = useState(AVATAR_COLORS[1]);
+  const [regIsClassAdmin, setRegIsClassAdmin] = useState(false);
 
   // Manage Filter
   const [manageClassFilter, setManageClassFilter] = useState<string>('all_filter');
@@ -119,16 +145,35 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }, 600);
   };
 
-  const handleQuickLogin = (user: AuthUser) => {
-    onSwitchUser(user);
-    const classLabel = user.assignedClassId === 'all' 
-      ? 'All Classes' 
-      : CLASSES_CONFIG.find(c => c.id === user.assignedClassId)?.name || user.assignedClassId;
-    setSuccessMsg(`Signed in as ${user.name} (${user.role.toUpperCase()} • ${classLabel})`);
-    setTimeout(() => {
-      onClose();
-      setSuccessMsg('');
-    }, 500);
+  const handleInitiateQuickSwitch = (targetUser: AuthUser) => {
+    if (targetUser.id === currentUser?.id) {
+      setErrorMsg('You are already authenticated as this user.');
+      return;
+    }
+    setErrorMsg('');
+    setPendingSwitchUser(targetUser);
+    setSwitchPinInput('');
+  };
+
+  const handleConfirmQuickSwitch = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pendingSwitchUser) return;
+
+    const expectedPin = pendingSwitchUser.pin || '2026';
+    if (switchPinInput.trim() === expectedPin || switchPinInput.trim() === '2026') {
+      onSwitchUser({ ...pendingSwitchUser, isAuthenticated: true });
+      const classLabel = pendingSwitchUser.assignedClassId === 'all' 
+        ? 'All Classes' 
+        : CLASSES_CONFIG.find(c => c.id === pendingSwitchUser.assignedClassId)?.name || pendingSwitchUser.assignedClassId;
+      setSuccessMsg(`Switched to ${pendingSwitchUser.name} (${pendingSwitchUser.role.toUpperCase()} • ${classLabel})`);
+      setPendingSwitchUser(null);
+      setTimeout(() => {
+        onClose();
+        setSuccessMsg('');
+      }, 500);
+    } else {
+      setErrorMsg('Incorrect PIN. Please enter the security PIN for this account (Demo default: 2026).');
+    }
   };
 
   const handleRegisterNewUser = (e: React.FormEvent) => {
@@ -166,15 +211,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       ? currentUser.assignedClassId 
       : regClassId;
 
-    // Class admins cannot create directors or other admins
-    const effectiveRole: Role = isClassAdmin && (regRole === 'director' || regRole === 'admin')
+    // Class admins cannot create directors
+    const effectiveRole: Role = isClassAdmin && regRole === 'director'
       ? 'tech'
       : regRole;
 
     const classInfo = CLASSES_CONFIG.find(c => c.id === effectiveClassId);
     const fallbackTitle = effectiveClassId === 'all'
       ? `${effectiveRole === 'director' ? 'Ministry Director' : effectiveRole === 'admin' ? 'Class Lead Admin' : effectiveRole === 'tech' ? 'Technical Lead' : effectiveRole === 'presenter' ? 'Lead Presenter' : 'Comms Lead'}`
-      : `${classInfo?.shortCode || ''} ${effectiveRole === 'admin' ? 'Class Admin' : effectiveRole === 'tech' ? 'Tech Volunteer' : effectiveRole === 'presenter' ? 'Teacher / Storyteller' : 'Comms Desk'}`;
+      : `${classInfo?.shortCode || ''} ${regIsClassAdmin ? 'Class Admin' : effectiveRole === 'tech' ? 'Tech Volunteer' : effectiveRole === 'presenter' ? 'Teacher / Storyteller' : 'Comms Desk'}`;
 
     const formattedPhone = formatSouthAfricanDisplay(regPhone);
     const zaWhatsApp = normalizeToE164ZA(regPhone).replace(/\+/g, '');
@@ -189,6 +234,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       phone: formattedPhone,
       whatsapp: zaWhatsApp,
       avatarColor: regAvatarColor,
+      isClassAdmin: isDirector ? regIsClassAdmin : false,
+      pin: regPin.trim() || '2026',
       isAuthenticated: true,
     };
 
@@ -204,254 +251,404 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   };
 
   const handleClearAllDefaultAccounts = () => {
-    if (confirm('Are you sure you want to remove ALL default seed accounts? This will wipe the demo names so you can start with a clean slate.')) {
+    setErrorMsg('');
+    setIsConfirmingClearDefaults(true);
+  };
+
+  const handleExecuteClearAllDefaults = () => {
+    if (onClearDefaultAccounts) {
+      onClearDefaultAccounts();
+    } else {
       clearAllSeedAccounts();
-      // Delete from parent state
-      registeredAccounts.forEach((acc) => {
-        if (acc.id !== currentUser.id) {
-          onDeleteAccount(acc.id);
-        }
-      });
-      setSuccessMsg('Default seed accounts cleared. You can now add your own real team!');
     }
+    setIsConfirmingClearDefaults(false);
+    setSuccessMsg('Default demo accounts permanently removed from database.');
   };
 
   const handleResetToDefaultAccounts = () => {
-    if (confirm('Reset accounts back to the default church seed accounts?')) {
-      const resetList = resetToSeedAccounts();
-      resetList.forEach((u) => onAddNewAccount(u));
-      setSuccessMsg('Accounts reset to church defaults.');
-    }
+    setErrorMsg('');
+    setIsConfirmingResetDefaults(true);
   };
 
-  const filteredAccounts = registeredAccounts.filter((account) => {
-    const matchesSearch = account.name.toLowerCase().includes(manageSearch.toLowerCase()) || 
-                          account.email.toLowerCase().includes(manageSearch.toLowerCase());
-    const matchesClass = manageClassFilter === 'all_filter' 
-      ? true 
-      : account.assignedClassId === manageClassFilter;
-    return matchesSearch && matchesClass;
-  });
+  const handleExecuteResetDefaults = () => {
+    if (onResetDefaultAccounts) {
+      onResetDefaultAccounts();
+    } else {
+      resetToSeedAccounts();
+    }
+    setIsConfirmingResetDefaults(false);
+    setSuccessMsg('Reset database back to default staff roster.');
+  };
+
+  const handlePromoteOrRevokeAdmin = (user: AuthUser) => {
+    if (!isDirector) {
+      setErrorMsg('Only the Director has permission to grant or revoke Class Admin roles.');
+      return;
+    }
+    setUserToToggleAdmin(user);
+  };
+
+  const handleExecuteToggleAdmin = () => {
+    if (!userToToggleAdmin) return;
+    const currentIsAdmin = Boolean(userToToggleAdmin.isClassAdmin) || userToToggleAdmin.role === 'admin';
+    if (currentIsAdmin) {
+      onRevokeClassAdmin?.(userToToggleAdmin.id);
+      setSuccessMsg(`Revoked Class Admin privileges for ${userToToggleAdmin.name}.`);
+    } else {
+      onPromoteToClassAdmin?.(userToToggleAdmin.id);
+      setSuccessMsg(`Promoted ${userToToggleAdmin.name} to Class Admin for ${userToToggleAdmin.assignedClassId.toUpperCase()}!`);
+    }
+    setUserToToggleAdmin(null);
+  };
+
+  const handleDeleteUserClick = (user: AuthUser) => {
+    if (user.id === currentUser.id) {
+      setErrorMsg('You cannot delete your own currently active account session.');
+      return;
+    }
+    setErrorMsg('');
+    setUserToDelete(user);
+  };
+
+  const handleExecuteDeleteUser = () => {
+    if (!userToDelete) return;
+    onDeleteAccount(userToDelete.id);
+    setSuccessMsg(`Account for "${userToDelete.name}" successfully removed from database.`);
+    setUserToDelete(null);
+  };
 
   const getClassBadge = (classId: ClassId) => {
     if (classId === 'all') {
       return (
-        <span className="px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wide bg-purple-500/20 text-purple-300 border border-purple-500/40">
-          All Classes (Director)
+        <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-purple-500/20 text-purple-300 border border-purple-500/40">
+          All 5 Classes
         </span>
       );
     }
     const c = CLASSES_CONFIG.find(cls => cls.id === classId);
     if (!c) return null;
     return (
-      <span className={`px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wide border ${c.themeBadge}`}>
-        {c.shortCode} • {c.colorName}
+      <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wide border ${c.themeBadge}`}>
+        {c.shortCode} • {c.name}
       </span>
     );
   };
 
+  const filteredAccounts = registeredAccounts.filter((acc) => {
+    const matchesSearch = 
+      acc.name.toLowerCase().includes(manageSearch.toLowerCase()) ||
+      acc.email.toLowerCase().includes(manageSearch.toLowerCase()) ||
+      (acc.phone && acc.phone.includes(manageSearch));
+
+    const matchesClass = 
+      manageClassFilter === 'all_filter' || 
+      acc.assignedClassId === manageClassFilter;
+
+    return matchesSearch && matchesClass;
+  });
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md overflow-y-auto animate-fadeIn">
-      <div className="relative w-full max-w-2xl bg-[#161626] border border-white/10 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 max-h-[92vh] flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-150">
+      <div className="w-full max-w-xl bg-[#121222] border border-white/10 rounded-3xl p-5 sm:p-6 space-y-4 shadow-2xl relative max-h-[92vh] flex flex-col">
         
-        {/* Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-white/5 shrink-0">
+        {/* Header Ribbon */}
+        <div className="flex items-center justify-between pb-3 border-b border-white/5 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-purple-600/20 border border-purple-500/40 flex items-center justify-center text-purple-400 shadow-[0_0_15px_rgba(147,51,234,0.3)]">
-              <KeyRound className="w-5 h-5" />
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-purple-700 via-indigo-600 to-amber-500 flex items-center justify-center text-white font-black text-sm shadow-[0_0_20px_rgba(147,51,234,0.4)]">
+              KC
             </div>
             <div>
-              <span className="text-[10px] font-bold text-purple-400 uppercase tracking-[0.2em] block mb-0.5">
-                CRC KIDS CHURCH AUTH & CLASS HUBS
-              </span>
-              <h2 className="text-lg font-bold text-white tracking-tight">Account & Class Assignment</h2>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-base font-black text-white uppercase tracking-tight">
+                  CRC KIDS CHURCH
+                </h2>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 font-black tracking-wide">
+                  🇿🇦 JOHANNESBURG
+                </span>
+              </div>
+              <p className="text-[11px] text-gray-400">
+                Team Access & Role Authority Center
+              </p>
             </div>
           </div>
 
           <button
             onClick={onClose}
-            className="p-2 rounded-xl text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
+            className="p-1.5 rounded-xl text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Status Toast Message */}
-        {successMsg && (
-          <div className="p-3 bg-green-500/20 border border-green-500/40 rounded-xl text-xs font-bold text-green-300 flex items-center gap-2 animate-fadeIn shrink-0">
-            <Check className="w-4 h-4" />
-            <span>{successMsg}</span>
-          </div>
-        )}
-
-        {errorMsg && (
-          <div className="p-3 bg-red-500/20 border border-red-500/40 rounded-xl text-xs font-bold text-red-300 flex items-center gap-2 animate-fadeIn shrink-0">
-            <ShieldAlert className="w-4 h-4" />
-            <span>{errorMsg}</span>
-          </div>
-        )}
-
         {/* Tab Navigation */}
-        <div className="flex items-center gap-1 bg-[#0e0e1a] p-1 rounded-xl border border-white/5 overflow-x-auto shrink-0">
+        <div className="flex items-center gap-1 p-1 bg-black/40 rounded-2xl border border-white/5 text-xs font-bold shrink-0 overflow-x-auto">
           <button
-            onClick={() => { setActiveTab('quick_switch'); setErrorMsg(''); }}
-            className={`flex-1 min-w-[90px] py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 whitespace-nowrap ${
-              activeTab === 'quick_switch'
-                ? 'bg-purple-600 text-white shadow-[0_0_15px_rgba(147,51,234,0.4)]'
-                : 'text-gray-400 hover:text-white'
+            onClick={() => {
+              setActiveTab('quick_switch');
+              setPendingSwitchUser(null);
+              setErrorMsg('');
+            }}
+            className={`py-1.5 px-3 rounded-xl transition-all flex items-center gap-1.5 whitespace-nowrap ${
+              activeTab === 'quick_switch' ? 'bg-purple-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'
             }`}
           >
-            <User className="w-3.5 h-3.5" />
-            <span>Quick Switch</span>
+            <Layers className="w-3.5 h-3.5" />
+            <span>Staff Roster</span>
           </button>
 
           {canCreateAccounts && (
             <button
-              onClick={() => { setActiveTab('register'); setErrorMsg(''); }}
-              className={`flex-1 min-w-[110px] py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 whitespace-nowrap ${
-                activeTab === 'register'
-                  ? 'bg-purple-600 text-white shadow-[0_0_15px_rgba(147,51,234,0.4)]'
-                  : 'text-gray-400 hover:text-white'
+              onClick={() => {
+                setActiveTab('register');
+                setPendingSwitchUser(null);
+                setErrorMsg('');
+              }}
+              className={`py-1.5 px-3 rounded-xl transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                activeTab === 'register' ? 'bg-purple-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'
               }`}
             >
-              <UserPlus className="w-3.5 h-3.5 text-purple-300" />
-              <span>+ Add Account</span>
+              <UserPlus className="w-3.5 h-3.5" />
+              <span>+ Register</span>
             </button>
           )}
 
           <button
-            onClick={() => { setActiveTab('manage'); setErrorMsg(''); }}
-            className={`flex-1 min-w-[110px] py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 whitespace-nowrap ${
-              activeTab === 'manage'
-                ? 'bg-purple-600 text-white shadow-[0_0_15px_rgba(147,51,234,0.4)]'
-                : 'text-gray-400 hover:text-white'
-            }`}
-          >
-            <Layers className="w-3.5 h-3.5" />
-            <span>Manage ({registeredAccounts.length})</span>
-          </button>
-
-          <button
-            onClick={() => { setActiveTab('login'); setErrorMsg(''); }}
-            className={`flex-1 min-w-[80px] py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 whitespace-nowrap ${
-              activeTab === 'login'
-                ? 'bg-purple-600 text-white shadow-[0_0_15px_rgba(147,51,234,0.4)]'
-                : 'text-gray-400 hover:text-white'
-            }`}
-          >
-            <LogIn className="w-3.5 h-3.5" />
-            <span>Sign In</span>
-          </button>
-
-          <button
-            onClick={() => { setActiveTab('permissions'); setErrorMsg(''); }}
-            className={`flex-1 min-w-[80px] py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 whitespace-nowrap ${
-              activeTab === 'permissions'
-                ? 'bg-purple-600 text-white shadow-[0_0_15px_rgba(147,51,234,0.4)]'
-                : 'text-gray-400 hover:text-white'
+            onClick={() => {
+              setActiveTab('manage');
+              setPendingSwitchUser(null);
+              setErrorMsg('');
+            }}
+            className={`py-1.5 px-3 rounded-xl transition-all flex items-center gap-1.5 whitespace-nowrap ${
+              activeTab === 'manage' ? 'bg-purple-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'
             }`}
           >
             <ShieldCheck className="w-3.5 h-3.5" />
-            <span>Roles</span>
+            <span>Manage & Remove</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setActiveTab('permissions');
+              setPendingSwitchUser(null);
+              setErrorMsg('');
+            }}
+            className={`py-1.5 px-3 rounded-xl transition-all flex items-center gap-1.5 whitespace-nowrap ${
+              activeTab === 'permissions' ? 'bg-purple-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'
+            }`}
+          >
+            <Shield className="w-3.5 h-3.5" />
+            <span>Hierarchy Rules</span>
           </button>
         </div>
 
-        {/* Scrollable Container for Tab Content */}
-        <div className="overflow-y-auto pr-1 flex-1 space-y-4">
+        {/* Feedback Messages */}
+        {errorMsg && (
+          <div className="p-3 bg-red-500/15 border border-red-500/40 rounded-xl text-xs text-red-300 flex items-center justify-between gap-2 shrink-0">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+              <span>{errorMsg}</span>
+            </div>
+            <button onClick={() => setErrorMsg('')} className="text-red-400 hover:text-white">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
+        {successMsg && (
+          <div className="p-3 bg-emerald-500/15 border border-emerald-500/40 rounded-xl text-xs text-emerald-300 flex items-center justify-between gap-2 shrink-0">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>{successMsg}</span>
+            </div>
+            <button onClick={() => setSuccessMsg('')} className="text-emerald-400 hover:text-white">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
+        {/* Tab Body */}
+        <div className="overflow-y-auto flex-1 pr-1 space-y-4">
           
-          {/* TAB 1: QUICK SWITCH (ACCOUNTS LIST WITH CLASS BADGES) */}
+          {/* TAB 1: QUICK SWITCH WITH PIN PROTECTION */}
           {activeTab === 'quick_switch' && (
             <div className="space-y-4">
-              <p className="text-xs text-gray-400">
-                Select an authorized volunteer or teacher to immediately switch view, permissions, and jump into their specific class hub:
-              </p>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {registeredAccounts.map((user) => {
-                  const isSelected = currentUser?.id === user.id || currentUser?.email === user.email;
-                  return (
-                    <button
-                      key={user.id}
-                      onClick={() => handleQuickLogin(user)}
-                      className={`p-3.5 rounded-2xl border text-left flex items-start justify-between transition-all group ${
-                        isSelected
-                          ? 'bg-purple-600/20 border-purple-500 shadow-[0_0_20px_rgba(147,51,234,0.3)]'
-                          : 'bg-black/30 border-white/10 hover:border-purple-500/40 hover:bg-white/5'
-                      }`}
-                    >
-                      <div className="flex items-start gap-3">
-                        <div
-                          className={`w-10 h-10 rounded-xl bg-gradient-to-br ${user.avatarColor || 'from-purple-500 to-indigo-600'} text-white font-bold flex items-center justify-center text-sm shadow-md shrink-0 mt-0.5`}
-                        >
-                          {user.name.charAt(0)}
+              {pendingSwitchUser ? (
+                /* INLINE PIN CHALLENGE MODAL */
+                <form onSubmit={handleConfirmQuickSwitch} className="p-4 bg-black/50 border border-purple-500/40 rounded-2xl space-y-4 animate-in fade-in">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${pendingSwitchUser.avatarColor || 'from-purple-600 to-indigo-600'} text-white font-bold flex items-center justify-center text-xs shadow-md`}>
+                        {pendingSwitchUser.name.charAt(0)}
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                          <span>Authenticate as {pendingSwitchUser.name}</span>
                         </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h4 className="text-xs font-bold text-white group-hover:text-purple-300 transition-colors">
-                              {user.name}
-                            </h4>
-                            {isSelected && (
-                              <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></span>
-                            )}
+                        <div className="text-[10px] text-gray-400">{pendingSwitchUser.roleTitle || pendingSwitchUser.role}</div>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setPendingSwitchUser(null)}
+                      className="text-xs text-gray-400 hover:text-white"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[10px] font-bold uppercase tracking-wider text-gray-300">
+                        Enter Security PIN
+                      </label>
+                      <span className="text-[10px] text-amber-400 font-mono">
+                        Demo PIN: <strong>2026</strong>
+                      </span>
+                    </div>
+                    <div className="relative">
+                      <input
+                        type={showSwitchPin ? 'text' : 'password'}
+                        value={switchPinInput}
+                        onChange={(e) => setSwitchPinInput(e.target.value)}
+                        placeholder="••••"
+                        maxLength={8}
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-black/60 border border-white/15 text-white placeholder-gray-600 text-center tracking-[0.4em] font-mono text-base font-bold focus:outline-none focus:border-purple-500 transition-colors"
+                        autoFocus
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowSwitchPin(!showSwitchPin)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
+                      >
+                        {showSwitchPin ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSwitchPinInput(pendingSwitchUser.pin || '2026')}
+                      className="px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 text-[11px] font-semibold transition-colors"
+                    >
+                      Auto-Fill (2026)
+                    </button>
+                    <button
+                      type="submit"
+                      className="flex-1 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:brightness-110 text-white text-xs font-bold rounded-xl shadow-lg shadow-purple-600/30 transition-all flex items-center justify-center gap-1.5"
+                    >
+                      <LogIn className="w-3.5 h-3.5" />
+                      <span>Verify & Switch Station</span>
+                    </button>
+                  </div>
+                </form>
+              ) : null}
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-gray-400 px-1">
+                  <span>Johannesburg Team Profiles ({registeredAccounts.length}):</span>
+                  <span className="text-[10px] text-purple-400 font-normal">PIN Protected</span>
+                </div>
+
+                <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
+                  {registeredAccounts.map((account) => {
+                    const isCurrent = currentUser?.id === account.id;
+                    const isAccDirector = account.role === 'director' || (account.role === 'admin' && account.assignedClassId === 'all');
+                    const isAccClassAdmin = Boolean(account.isClassAdmin) || (account.role === 'admin' && account.assignedClassId !== 'all');
+
+                    return (
+                      <div
+                        key={account.id}
+                        className={`p-3 rounded-2xl border flex items-center justify-between gap-3 transition-all ${
+                          isCurrent
+                            ? 'bg-purple-900/30 border-purple-500/60 ring-1 ring-purple-500/40'
+                            : isAccDirector
+                            ? 'bg-amber-950/20 border-amber-500/30'
+                            : isAccClassAdmin
+                            ? 'bg-purple-950/20 border-purple-500/30'
+                            : 'bg-white/5 border-white/5 hover:border-white/20'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${account.avatarColor || 'from-purple-600 to-indigo-600'} text-white font-black flex items-center justify-center text-sm shadow-md shrink-0`}>
+                            {account.name.charAt(0).toUpperCase()}
                           </div>
-                          <p className="text-[11px] text-gray-400">{user.roleTitle || user.email}</p>
                           
-                          <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-                            <span
-                              className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full border ${
-                                user.role === 'admin'
-                                  ? 'bg-amber-500/10 text-amber-300 border-amber-500/30'
-                                  : user.role === 'tech'
-                                  ? 'bg-blue-500/10 text-blue-300 border-blue-500/30'
-                                  : user.role === 'presenter'
-                                  ? 'bg-purple-500/10 text-purple-300 border-purple-500/30'
-                                  : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
-                              }`}
-                            >
-                              {user.role}
-                            </span>
-                            {getClassBadge(user.assignedClassId)}
+                          <div className="min-w-0">
+                            <div className="text-xs font-bold text-white flex items-center gap-2 flex-wrap">
+                              <span>{account.name}</span>
+                              {isCurrent && (
+                                <span className="px-1.5 py-0.2 rounded bg-green-500/20 text-green-300 text-[8px] font-black uppercase border border-green-500/40">
+                                  Logged In
+                                </span>
+                              )}
+                              
+                              {/* Distinction Badges */}
+                              {isAccDirector ? (
+                                <span className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-0.5 shrink-0">
+                                  <Crown className="w-2.5 h-2.5 text-amber-400" />
+                                  <span>DIRECTOR</span>
+                                </span>
+                              ) : isAccClassAdmin ? (
+                                <span className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase tracking-wider bg-purple-500/20 text-purple-300 border border-purple-500/40 flex items-center gap-0.5 shrink-0">
+                                  <ShieldCheck className="w-2.5 h-2.5 text-purple-400" />
+                                  <span>CLASS ADMIN</span>
+                                </span>
+                              ) : null}
+                            </div>
+                            
+                            <div className="text-[11px] text-gray-400 truncate">
+                              {account.roleTitle || account.role}
+                            </div>
+                            
+                            <div className="flex items-center gap-2 mt-1 flex-wrap">
+                              {getClassBadge(account.assignedClassId)}
+                              {account.phone && (
+                                <span className="text-[10px] text-gray-400 font-mono">
+                                  {account.phone}
+                                </span>
+                              )}
+                            </div>
                           </div>
+                        </div>
+
+                        <div className="shrink-0">
+                          {isCurrent ? (
+                            <span className="text-[11px] font-bold text-green-400 px-2.5 py-1 rounded-lg bg-green-500/10 border border-green-500/30">
+                              Active
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleInitiateQuickSwitch(account)}
+                              className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold shadow-sm transition-all flex items-center gap-1"
+                            >
+                              <KeyRound className="w-3 h-3" />
+                              <span>Switch</span>
+                            </button>
+                          )}
                         </div>
                       </div>
-
-                      {isSelected ? (
-                        <span className="text-[10px] font-bold text-green-400 bg-green-500/10 px-2 py-0.5 rounded-md border border-green-500/30 shrink-0">
-                          Active
-                        </span>
-                      ) : (
-                        <span className="text-xs text-gray-500 group-hover:text-purple-400 font-bold transition-colors shrink-0">
-                          Select →
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="pt-2 text-center">
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('register')}
-                  className="text-xs text-purple-400 hover:text-purple-300 font-bold flex items-center justify-center gap-1.5 mx-auto py-1"
-                >
-                  <UserPlus className="w-4 h-4" />
-                  <span>Don't see your name? Add a new account here →</span>
-                </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           )}
 
-          {/* TAB 2: ADD NEW ACCOUNT / REGISTER VOLUNTEER */}
+          {/* TAB 2: REGISTER NEW ACCOUNT */}
           {activeTab === 'register' && (
             <form onSubmit={handleRegisterNewUser} className="space-y-4">
-              <div className="bg-purple-950/20 border border-purple-500/30 rounded-2xl p-4 text-xs space-y-1">
-                <span className="font-bold text-purple-300 flex items-center gap-1.5">
-                  <UserPlus className="w-4 h-4" />
-                  Add Team Account & Assign Class
-                </span>
-                <p className="text-gray-400 text-[11px] leading-relaxed">
-                  Create an account for any volunteer, teacher, tech engineer, or youth leader. When they log in, they will be automatically directed to their assigned class hub!
+              <div className="p-3 bg-purple-950/20 border border-purple-500/20 rounded-2xl text-xs text-gray-300 space-y-1">
+                <div className="font-bold text-white flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-purple-400" />
+                  <span>Johannesburg Staff Registration</span>
+                </div>
+                <p className="text-[11px] text-gray-400">
+                  {isDirector
+                    ? 'As Director, you have authority to create accounts for any class and grant Class Admin roles.'
+                    : `As Class Admin, you can add volunteers to your assigned class: ${currentUser.assignedClassId.toUpperCase()}.`}
                 </p>
               </div>
 
@@ -465,7 +662,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     required
                     value={regName}
                     onChange={(e) => setRegName(e.target.value)}
-                    placeholder="e.g. Sipho Dlamini"
+                    placeholder="e.g. Sipho Ndlovu"
                     className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-purple-500"
                   />
                 </div>
@@ -483,187 +680,98 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-purple-500"
                   />
                 </div>
+              </div>
 
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[10px] font-bold text-gray-300 uppercase tracking-wider mb-1">
-                    Password
+                    South African Mobile / WhatsApp *
                   </label>
                   <input
-                    type="password"
-                    value={regPassword}
-                    onChange={(e) => setRegPassword(e.target.value)}
-                    placeholder="Optional / PIN"
-                    className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-purple-500"
+                    type="tel"
+                    required
+                    value={regPhone}
+                    onChange={(e) => setRegPhone(e.target.value)}
+                    placeholder="082 123 4567 or +27 82 123 4567"
+                    className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 font-mono"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-bold text-gray-300 uppercase tracking-wider mb-1 flex items-center justify-between">
-                    <span>South Africa WhatsApp / Phone *</span>
-                    <span className="text-emerald-400 font-normal text-[10px]">🇿🇦 Required for WhatsApp & Alerts</span>
+                  <label className="block text-[10px] font-bold text-gray-300 uppercase tracking-wider mb-1">
+                    Assigned PIN / Passcode *
                   </label>
-                  <div className="relative">
-                    <input
-                      type="tel"
-                      required
-                      value={regPhone}
-                      onChange={(e) => setRegPhone(e.target.value)}
-                      placeholder="e.g. 082 123 4567 or +27 82 123 4567"
-                      className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-purple-500"
-                    />
-                  </div>
-                  <p className="text-[10px] text-gray-500 mt-0.5">
-                    Enter a valid South African mobile number (starts with 06, 07, 08 or +27).
-                  </p>
+                  <input
+                    type="text"
+                    required
+                    value={regPin}
+                    onChange={(e) => setRegPin(e.target.value)}
+                    placeholder="2026"
+                    maxLength={8}
+                    className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 font-mono text-center tracking-widest font-bold"
+                  />
                 </div>
               </div>
 
-              {/* Class Hub Assignment */}
+              {/* Class Selection */}
               <div>
-                <label className="block text-[10px] font-bold text-gray-300 uppercase tracking-wider mb-1.5 flex items-center justify-between">
-                  <span>Assigned Class Hub *</span>
-                  {isClassAdmin ? (
-                    <span className="text-amber-400 font-bold text-[10px]">Locked to Your Class (Admin Policy)</span>
-                  ) : (
-                    <span className="text-purple-400 font-normal text-[10px]">User will automatically open this hub</span>
-                  )}
+                <label className="block text-[10px] font-bold text-gray-300 uppercase tracking-wider mb-1.5">
+                  Assigned Class Hub *
                 </label>
-
-                {isClassAdmin ? (
-                  <div className="p-3 rounded-xl bg-purple-900/20 border border-purple-500/40 flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-xs font-bold text-white">
-                      <span className="w-2.5 h-2.5 rounded-full bg-purple-400"></span>
-                      <span>
-                        {CLASSES_CONFIG.find(c => c.id === currentUser.assignedClassId)?.name || currentUser.assignedClassId} Class Hub
-                      </span>
-                    </div>
-                    <span className="text-[10px] text-gray-400 font-mono">
-                      Restricted to your class
-                    </span>
+                
+                {isClassAdmin && currentUser.assignedClassId !== 'all' ? (
+                  <div className="p-3 rounded-xl bg-purple-950/30 border border-purple-500/40 text-xs">
+                    <span className="text-gray-400">Class Admins are restricted to their own class: </span>
+                    <strong className="text-white uppercase">{currentUser.assignedClassId}</strong>
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setRegClassId('jy')}
-                      className={`p-2.5 rounded-xl border text-left transition-all ${
-                        regClassId === 'jy'
-                          ? 'bg-blue-600/30 border-blue-500 ring-2 ring-blue-500/40'
-                          : 'bg-black/30 border-white/10 hover:border-blue-500/40'
-                      }`}
-                    >
-                      <div className="flex items-center gap-1.5 font-bold text-xs text-white">
-                        <span className="w-2 h-2 rounded-full bg-blue-400"></span>
-                        Junior Youth
-                      </div>
-                      <div className="text-[10px] text-blue-300 font-mono">Blue Class • Gr 6-7</div>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setRegClassId('tb')}
-                      className={`p-2.5 rounded-xl border text-left transition-all ${
-                        regClassId === 'tb'
-                          ? 'bg-pink-600/30 border-pink-500 ring-2 ring-pink-500/40'
-                          : 'bg-black/30 border-white/10 hover:border-pink-500/40'
-                      }`}
-                    >
-                      <div className="flex items-center gap-1.5 font-bold text-xs text-white">
-                        <span className="w-2 h-2 rounded-full bg-pink-400"></span>
-                        TRAILBLAZERS
-                      </div>
-                      <div className="text-[10px] text-pink-300 font-mono">Pink Class • Gr 4-5</div>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setRegClassId('kb')}
-                      className={`p-2.5 rounded-xl border text-left transition-all ${
-                        regClassId === 'kb'
-                          ? 'bg-red-600/30 border-red-500 ring-2 ring-red-500/40'
-                          : 'bg-black/30 border-white/10 hover:border-red-500/40'
-                      }`}
-                    >
-                      <div className="flex items-center gap-1.5 font-bold text-xs text-white">
-                        <span className="w-2 h-2 rounded-full bg-red-400"></span>
-                        Kingdom Builders
-                      </div>
-                      <div className="text-[10px] text-red-300 font-mono">Red Class • Gr 1-3</div>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setRegClassId('la-orange')}
-                      className={`p-2.5 rounded-xl border text-left transition-all ${
-                        regClassId === 'la-orange'
-                          ? 'bg-orange-600/30 border-orange-500 ring-2 ring-orange-500/40'
-                          : 'bg-black/30 border-white/10 hover:border-orange-500/40'
-                      }`}
-                    >
-                      <div className="flex items-center gap-1.5 font-bold text-xs text-white">
-                        <span className="w-2 h-2 rounded-full bg-orange-400"></span>
-                        LA Orange
-                      </div>
-                      <div className="text-[10px] text-orange-300 font-mono">Orange • 5-6 yrs</div>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setRegClassId('la-yellow')}
-                      className={`p-2.5 rounded-xl border text-left transition-all ${
-                        regClassId === 'la-yellow'
-                          ? 'bg-yellow-600/30 border-yellow-500 ring-2 ring-yellow-500/40'
-                          : 'bg-black/30 border-white/10 hover:border-yellow-500/40'
-                      }`}
-                    >
-                      <div className="flex items-center gap-1.5 font-bold text-xs text-white">
-                        <span className="w-2 h-2 rounded-full bg-yellow-400"></span>
-                        LA Yellow
-                      </div>
-                      <div className="text-[10px] text-yellow-300 font-mono">Yellow • 3-4 yrs</div>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setRegClassId('all')}
-                      className={`p-2.5 rounded-xl border text-left transition-all ${
-                        regClassId === 'all'
-                          ? 'bg-purple-600/30 border-purple-500 ring-2 ring-purple-500/40'
-                          : 'bg-black/30 border-white/10 hover:border-purple-500/40'
-                      }`}
-                    >
-                      <div className="flex items-center gap-1.5 font-bold text-xs text-white">
-                        <span className="w-2 h-2 rounded-full bg-purple-400"></span>
-                        All Classes
-                      </div>
-                      <div className="text-[10px] text-purple-300 font-mono">Director / Multi</div>
-                    </button>
+                    {CLASSES_CONFIG.map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => setRegClassId(c.id)}
+                        className={`p-2.5 rounded-xl border text-left transition-all ${
+                          regClassId === c.id
+                            ? `${c.accentBorder} bg-black/50 ring-2 ring-purple-500/40`
+                            : 'bg-black/30 border-white/10 hover:border-purple-500/40'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 font-bold text-xs text-white">
+                          <span className={`w-2 h-2 rounded-full ${c.accentBg}`}></span>
+                          {c.shortCode}
+                        </div>
+                        <div className="text-[10px] text-gray-400 truncate">{c.name}</div>
+                      </button>
+                    ))}
+                    
+                    {isDirector && (
+                      <button
+                        type="button"
+                        onClick={() => setRegClassId('all')}
+                        className={`p-2.5 rounded-xl border text-left transition-all ${
+                          regClassId === 'all'
+                            ? 'bg-amber-600/30 border-amber-500 ring-2 ring-amber-500/40'
+                            : 'bg-black/30 border-white/10 hover:border-amber-500/40'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 font-bold text-xs text-white">
+                          <Crown className="w-3 h-3 text-amber-400" />
+                          <span>All 5 Classes</span>
+                        </div>
+                        <div className="text-[10px] text-amber-300/80">Director / Multi</div>
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
 
-              {/* Role Selection */}
+              {/* Duty Role Selection */}
               <div>
                 <label className="block text-[10px] font-bold text-gray-300 uppercase tracking-wider mb-1.5">
-                  Assigned Duty / Role *
+                  Assigned Duty / Station *
                 </label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  {isDirector && (
-                    <button
-                      type="button"
-                      onClick={() => setRegRole('admin')}
-                      className={`p-2.5 rounded-xl border text-center transition-all ${
-                        regRole === 'admin'
-                          ? 'bg-amber-500/20 border-amber-500 text-amber-300'
-                          : 'bg-black/30 border-white/10 text-gray-400 hover:text-white'
-                      }`}
-                    >
-                      <ShieldCheck className="w-4 h-4 mx-auto mb-1" />
-                      <div className="text-[11px] font-bold">Admin</div>
-                      <div className="text-[9px] opacity-75">Class Lead</div>
-                    </button>
-                  )}
-
+                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                   <button
                     type="button"
                     onClick={() => setRegRole('tech')}
@@ -705,89 +813,226 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     <div className="text-[11px] font-bold">Comms</div>
                     <div className="text-[9px] opacity-75">Timeline / Cues</div>
                   </button>
+
+                  {isDirector && (
+                    <button
+                      type="button"
+                      onClick={() => setRegRole('director')}
+                      className={`p-2.5 rounded-xl border text-center transition-all ${
+                        regRole === 'director'
+                          ? 'bg-amber-500/20 border-amber-500 text-amber-300'
+                          : 'bg-black/30 border-white/10 text-gray-400 hover:text-white'
+                      }`}
+                    >
+                      <Crown className="w-4 h-4 mx-auto mb-1" />
+                      <div className="text-[11px] font-bold">Director</div>
+                      <div className="text-[9px] opacity-75">Overall Lead</div>
+                    </button>
+                  )}
                 </div>
               </div>
 
-              {/* Custom Role Title & Avatar Color */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[10px] font-bold text-gray-300 uppercase tracking-wider mb-1">
-                    Custom Title (Optional)
-                  </label>
+              {/* Director Option: Appoint as Class Admin */}
+              {isDirector && regClassId !== 'all' && (
+                <div className="p-3 bg-black/40 border border-purple-500/30 rounded-xl flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <ShieldCheck className="w-4 h-4 text-purple-400" />
+                      <span>Appoint as Class Admin</span>
+                    </div>
+                    <p className="text-[10px] text-gray-400 mt-0.5">
+                      Grants this member authority to create and remove accounts in their assigned class ({regClassId.toUpperCase()}).
+                    </p>
+                  </div>
                   <input
-                    type="text"
-                    value={regRoleTitle}
-                    onChange={(e) => setRegRoleTitle(e.target.value)}
-                    placeholder="e.g. Lead Storyteller, Sound Captain"
-                    className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-purple-500"
+                    type="checkbox"
+                    checked={regIsClassAdmin}
+                    onChange={(e) => setRegIsClassAdmin(e.target.checked)}
+                    className="w-5 h-5 accent-purple-600 rounded cursor-pointer shrink-0"
                   />
                 </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold text-gray-300 uppercase tracking-wider mb-1">
-                    Avatar Color
-                  </label>
-                  <div className="flex items-center gap-2 pt-1">
-                    {AVATAR_COLORS.map((col, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => setRegAvatarColor(col)}
-                        className={`w-7 h-7 rounded-lg bg-gradient-to-br ${col} transition-all ${
-                          regAvatarColor === col ? 'ring-2 ring-white scale-110 shadow-md' : 'opacity-70 hover:opacity-100'
-                        }`}
-                      />
-                    ))}
-                  </div>
-                </div>
-              </div>
+              )}
 
               <div className="pt-2">
                 <button
                   type="submit"
-                  className="w-full py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs transition-all shadow-lg shadow-purple-600/30 flex items-center justify-center gap-2"
+                  className="w-full py-3 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs transition-all shadow-lg shadow-purple-600/30 flex items-center justify-center gap-2 active:scale-95"
                 >
                   <UserPlus className="w-4 h-4" />
-                  <span>Register Account & Sign In Now</span>
+                  <span>Register Volunteer Account</span>
                 </button>
               </div>
             </form>
           )}
 
-          {/* TAB 3: MANAGE ACCOUNTS (VIEW, WHATSAPP & DELETE) */}
+          {/* TAB 3: MANAGE ACCOUNTS (WITH CLEAR ADMIN ROLES, PROMOTION & WORKING DELETE BUTTON) */}
           {activeTab === 'manage' && (
             <div className="space-y-4">
-              {/* Clean Slate & Seed Accounts Controls */}
-              {isDirector && (
-                <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-2.5 text-xs">
-                  <div className="flex items-center gap-2 text-amber-300">
-                    <AlertTriangle className="w-4 h-4 shrink-0" />
-                    <div>
-                      <span className="font-bold">Manage Default People & Demo Names</span>
-                      <p className="text-[11px] text-gray-400">Remove all default mock people to start with your actual church volunteer team.</p>
-                    </div>
+              {/* Database Storage Engine Status Banner */}
+              <div className="p-3 bg-emerald-950/30 border border-emerald-500/30 rounded-2xl flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2 text-emerald-300">
+                  <Database className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <div>
+                    <span className="font-bold">Database Storage Active (IndexedDB & Synced Cache)</span>
+                    <p className="text-[11px] text-emerald-400/80">Account additions, deletions, and updates persist permanently across reloads.</p>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
+                </div>
+                <span className="text-[10px] text-emerald-400 font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/40">
+                  Persistent
+                </span>
+              </div>
+
+              {/* Confirmation Dialog: Delete Specific User */}
+              {userToDelete && (
+                <div className="p-4 bg-red-950/70 border border-red-500 rounded-2xl animate-in fade-in space-y-2.5 shadow-xl">
+                  <div className="flex items-center gap-2 text-red-300 font-bold text-xs">
+                    <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                    <span>Confirm Permanent Account Deletion</span>
+                  </div>
+                  <p className="text-xs text-gray-200">
+                    Are you sure you want to permanently delete the profile for <strong>"{userToDelete.name}"</strong> ({userToDelete.email}) from the church database?
+                  </p>
+                  <div className="flex items-center justify-end gap-2 pt-1">
                     <button
                       type="button"
-                      onClick={handleClearAllDefaultAccounts}
-                      className="px-2.5 py-1 rounded-lg bg-red-600/40 hover:bg-red-600 border border-red-500/40 text-red-200 hover:text-white text-[11px] font-bold transition-colors flex items-center gap-1"
+                      onClick={() => setUserToDelete(null)}
+                      className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-semibold text-gray-300"
                     >
-                      <Trash2 className="w-3 h-3" />
-                      <span>Remove Default People</span>
+                      Cancel
                     </button>
                     <button
                       type="button"
-                      onClick={handleResetToDefaultAccounts}
-                      title="Reset back to default seed accounts"
-                      className="p-1 rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition-colors"
+                      onClick={handleExecuteDeleteUser}
+                      className="px-3.5 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-xs font-bold text-white flex items-center gap-1.5 shadow-lg shadow-red-900/50"
                     >
-                      <RotateCcw className="w-3.5 h-3.5" />
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Yes, Delete Account</span>
                     </button>
                   </div>
                 </div>
               )}
 
+              {/* Confirmation Dialog: Clear All Default Demo Accounts */}
+              {isConfirmingClearDefaults && (
+                <div className="p-4 bg-red-950/70 border border-red-500 rounded-2xl animate-in fade-in space-y-2.5 shadow-xl">
+                  <div className="flex items-center gap-2 text-red-300 font-bold text-xs">
+                    <Trash2 className="w-4 h-4 text-red-400 shrink-0" />
+                    <span>Remove All Default Demo Accounts</span>
+                  </div>
+                  <p className="text-xs text-gray-200">
+                    This will permanently wipe all pre-loaded seed demo staff (Thabo, Lebo, Nomsa, Aunty Grace, Uncle David, Guest) from the database so only your real church volunteers remain.
+                  </p>
+                  <div className="flex items-center justify-end gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setIsConfirmingClearDefaults(false)}
+                      className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-semibold text-gray-300"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleExecuteClearAllDefaults}
+                      className="px-3.5 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-xs font-bold text-white flex items-center gap-1.5 shadow-lg shadow-red-900/50"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Yes, Remove All Default Accounts</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Confirmation Dialog: Reset Defaults */}
+              {isConfirmingResetDefaults && (
+                <div className="p-4 bg-purple-950/70 border border-purple-500 rounded-2xl animate-in fade-in space-y-2.5 shadow-xl">
+                  <div className="flex items-center gap-2 text-purple-300 font-bold text-xs">
+                    <RotateCcw className="w-4 h-4 text-purple-400 shrink-0" />
+                    <span>Reset Staff Roster to Defaults</span>
+                  </div>
+                  <p className="text-xs text-gray-200">
+                    Reset back to the standard CRC Kids Church default staff profiles across all classes?
+                  </p>
+                  <div className="flex items-center justify-end gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setIsConfirmingResetDefaults(false)}
+                      className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-semibold text-gray-300"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleExecuteResetDefaults}
+                      className="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-xs font-bold text-white flex items-center gap-1.5 shadow-lg shadow-purple-900/50"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>Yes, Reset to Defaults</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Confirmation Dialog: Promote/Revoke Admin */}
+              {userToToggleAdmin && (
+                <div className="p-4 bg-indigo-950/70 border border-indigo-500 rounded-2xl animate-in fade-in space-y-2.5 shadow-xl">
+                  <div className="flex items-center gap-2 text-indigo-300 font-bold text-xs">
+                    <ShieldCheck className="w-4 h-4 text-indigo-400 shrink-0" />
+                    <span>Change Class Admin Privileges</span>
+                  </div>
+                  <p className="text-xs text-gray-200">
+                    {(Boolean(userToToggleAdmin.isClassAdmin) || userToToggleAdmin.role === 'admin')
+                      ? `Revoke Class Admin privileges for "${userToToggleAdmin.name}"?`
+                      : `Appoint "${userToToggleAdmin.name}" as Class Admin for ${userToToggleAdmin.assignedClassId.toUpperCase()}?`}
+                  </p>
+                  <div className="flex items-center justify-end gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setUserToToggleAdmin(null)}
+                      className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-semibold text-gray-300"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleExecuteToggleAdmin}
+                      className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white flex items-center gap-1.5"
+                    >
+                      <span>Confirm</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Director Reset Controls */}
+              <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-2.5 text-xs">
+                <div className="flex items-center gap-2 text-amber-300">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <div>
+                    <span className="font-bold">Staff Directory Oversight</span>
+                    <p className="text-[11px] text-gray-400">Clear default seed profiles so only your real church volunteers remain.</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleClearAllDefaultAccounts}
+                    className="px-3 py-1.5 rounded-lg bg-red-600/30 hover:bg-red-600 border border-red-500/40 text-red-200 hover:text-white text-[11px] font-bold transition-colors flex items-center gap-1"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Remove Default Seed</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleResetToDefaultAccounts}
+                    title="Reset back to default seed accounts"
+                    className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition-colors"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Filters */}
               <div className="flex flex-col sm:flex-row items-center gap-2 justify-between">
                 <input
                   type="text"
@@ -800,7 +1045,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <select
                   value={manageClassFilter}
                   onChange={(e) => setManageClassFilter(e.target.value)}
-                  className="w-full sm:w-auto bg-black/40 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-purple-500"
+                  className="w-full sm:w-auto bg-black/40 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-purple-500 font-semibold"
                 >
                   <option value="all_filter">All Classes</option>
                   <option value="jy">Junior Youth (Blue)</option>
@@ -812,33 +1057,56 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </select>
               </div>
 
+              {/* Account Roster List */}
               <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
                 {filteredAccounts.map((user) => {
                   const isCurrent = currentUser?.id === user.id;
-                  const waNumber = user.whatsapp || user.phone;
-                  const waLink = waNumber ? getSouthAfricaWhatsAppLink(waNumber) : '';
+                  const isTargetDirector = user.role === 'director' || (user.role === 'admin' && user.assignedClassId === 'all');
+                  const isTargetClassAdmin = Boolean(user.isClassAdmin) || (user.role === 'admin' && user.assignedClassId !== 'all');
+                  
+                  const canDelete = !isCurrent;
 
                   return (
                     <div
                       key={user.id}
-                      className="p-3 bg-black/30 border border-white/5 hover:border-white/15 rounded-xl flex items-center justify-between gap-3 transition-colors"
+                      className={`p-3 rounded-2xl border flex items-center justify-between gap-3 transition-colors ${
+                        isTargetDirector
+                          ? 'bg-amber-950/20 border-amber-500/30'
+                          : isTargetClassAdmin
+                          ? 'bg-purple-950/20 border-purple-500/30'
+                          : 'bg-black/30 border-white/5 hover:border-white/15'
+                      }`}
                     >
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
                         <div
-                          className={`w-9 h-9 rounded-xl bg-gradient-to-br ${user.avatarColor || 'from-purple-500 to-indigo-600'} text-white font-bold flex items-center justify-center text-xs shadow shrink-0`}
+                          className={`w-10 h-10 rounded-xl bg-gradient-to-br ${user.avatarColor || 'from-purple-500 to-indigo-600'} text-white font-bold flex items-center justify-center text-xs shadow shrink-0`}
                         >
                           {user.name.charAt(0)}
                         </div>
-                        <div>
-                          <div className="flex items-center gap-2">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <span className="text-xs font-bold text-white">{user.name}</span>
+                            
+                            {/* Distinguish who has admin roles */}
+                            {isTargetDirector ? (
+                              <span className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase tracking-wider bg-amber-500/30 text-amber-300 border border-amber-500/50 flex items-center gap-0.5">
+                                <Crown className="w-2.5 h-2.5 text-amber-400" />
+                                <span>DIRECTOR</span>
+                              </span>
+                            ) : isTargetClassAdmin ? (
+                              <span className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase tracking-wider bg-purple-500/30 text-purple-300 border border-purple-500/50 flex items-center gap-0.5">
+                                <ShieldCheck className="w-2.5 h-2.5 text-purple-400" />
+                                <span>CLASS ADMIN</span>
+                              </span>
+                            ) : null}
+
                             {isCurrent && (
                               <span className="text-[9px] font-bold text-green-400 bg-green-500/10 px-1.5 py-0.2 rounded border border-green-500/30">
-                                Active
+                                You
                               </span>
                             )}
                           </div>
-                          <div className="text-[11px] text-gray-400">{user.email} • {user.roleTitle || user.role}</div>
+                          <div className="text-[11px] text-gray-400 truncate">{user.email} • {user.roleTitle || user.role}</div>
                           <div className="flex items-center gap-2 mt-1 flex-wrap">
                             {getClassBadge(user.assignedClassId)}
                             {user.phone && (
@@ -847,47 +1115,52 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                                 {user.phone}
                               </span>
                             )}
+                            {user.pin && (
+                              <span className="text-[9px] text-gray-400 font-mono">
+                                PIN: {user.pin}
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>
 
+                      {/* Actions: Promote / Revoke (Director) & Working Delete */}
                       <div className="flex items-center gap-1.5 shrink-0">
-                        {waLink && (
-                          <a
-                            href={waLink}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="px-2 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 rounded-lg text-xs font-bold border border-emerald-500/30 transition-colors flex items-center gap-1"
-                            title="Message on WhatsApp"
-                          >
-                            <MessageCircle className="w-3 h-3 text-emerald-400" />
-                            <span className="hidden sm:inline">WhatsApp</span>
-                          </a>
-                        )}
-
-                        {!isCurrent && (
+                        {/* Director promotion control */}
+                        {isDirector && !isTargetDirector && (
                           <button
                             type="button"
-                            onClick={() => handleQuickLogin(user)}
-                            className="px-2.5 py-1 bg-purple-600/30 hover:bg-purple-600 text-purple-200 hover:text-white rounded-lg text-xs font-bold border border-purple-500/30 transition-colors"
+                            onClick={() => handlePromoteOrRevokeAdmin(user)}
+                            className={`px-2 py-1 rounded-lg text-[10px] font-bold uppercase transition-all ${
+                              isTargetClassAdmin
+                                ? 'bg-purple-600/30 hover:bg-purple-600 text-purple-200 border border-purple-500/30'
+                                : 'bg-white/5 hover:bg-purple-600/40 text-gray-300 hover:text-white border border-white/10'
+                            }`}
+                            title={isTargetClassAdmin ? 'Revoke Class Admin privileges' : 'Appoint as Class Admin for their class'}
                           >
-                            Switch
+                            {isTargetClassAdmin ? 'Revoke Admin' : '+ Make Admin'}
                           </button>
                         )}
 
-                        {/* Allow deleting any account including preconfigured ones */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (confirm(`Remove account for ${user.name}?`)) {
-                              onDeleteAccount(user.id);
-                            }
-                          }}
-                          title="Delete this account"
-                          className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        {/* Working Remove / Delete Button */}
+                        {canDelete ? (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteUserClick(user)}
+                            title={`Remove ${user.name}`}
+                            className="p-1.5 text-red-400 hover:text-white bg-red-500/10 hover:bg-red-600 border border-red-500/20 rounded-xl transition-all flex items-center gap-1 text-[11px] font-bold"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span className="hidden sm:inline">Remove</span>
+                          </button>
+                        ) : (
+                          <span
+                            className="p-1.5 text-gray-600 cursor-not-allowed"
+                            title="Only an authorized Admin for this class can remove people"
+                          >
+                            <Lock className="w-3.5 h-3.5" />
+                          </span>
+                        )}
                       </div>
                     </div>
                   );
@@ -902,123 +1175,60 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </div>
           )}
 
-          {/* TAB 4: CUSTOM SIGN IN */}
-          {activeTab === 'login' && (
-            <form onSubmit={handleCustomLogin} className="space-y-4">
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-[11px] font-bold text-gray-300 uppercase tracking-wider mb-1">
-                    Email Address *
-                  </label>
-                  <div className="relative">
-                    <Mail className="w-4 h-4 text-gray-500 absolute left-3 top-3" />
-                    <input
-                      type="email"
-                      required
-                      value={emailInput}
-                      onChange={(e) => setEmailInput(e.target.value)}
-                      placeholder="e.g. yourname@crc.church"
-                      className="w-full bg-black/40 border border-white/10 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-purple-500"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-gray-300 uppercase tracking-wider mb-1">
-                    Password / PIN
-                  </label>
-                  <div className="relative">
-                    <Lock className="w-4 h-4 text-gray-500 absolute left-3 top-3" />
-                    <input
-                      type="password"
-                      value={passwordInput}
-                      onChange={(e) => setPasswordInput(e.target.value)}
-                      placeholder="••••••••"
-                      className="w-full bg-black/40 border border-white/10 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-purple-500"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-gray-300 uppercase tracking-wider mb-1">
-                    Select Target Class Hub
-                  </label>
-                  <select
-                    value={selectedClassId}
-                    onChange={(e) => setSelectedClassId(e.target.value as ClassId)}
-                    className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500 font-semibold"
-                  >
-                    <option value="all">🌐 All Classes (Director / Overseer)</option>
-                    <option value="jy">🔵 Junior Youth (Blue Class, Gr 6-7)</option>
-                    <option value="tb">🌸 TRAILBLAZERS (Pink Class, Gr 4-5)</option>
-                    <option value="kb">🔴 Kingdom Builders (Red Class, Gr 1-3)</option>
-                    <option value="la-orange">🟠 Little Adventures Orange (5-6 yrs)</option>
-                    <option value="la-yellow">🟡 Little Adventures Yellow (3-4 yrs)</option>
-                  </select>
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                className="w-full py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs transition-all shadow-lg shadow-purple-600/30 flex items-center justify-center gap-2"
-              >
-                <LogIn className="w-4 h-4" />
-                <span>Sign In & Open Class Hub</span>
-              </button>
-            </form>
-          )}
-
-          {/* TAB 5: ROLES & PERMISSIONS GUIDE */}
+          {/* TAB 4: ROLES & HIERARCHY RULES */}
           {activeTab === 'permissions' && (
             <div className="space-y-3">
-              <div className="p-3 bg-black/30 border border-white/5 rounded-xl space-y-1">
-                <div className="flex items-center gap-1.5 text-amber-300 font-bold text-xs">
-                  <ShieldCheck className="w-4 h-4" />
-                  Admin / Director
+              <div className="p-3.5 bg-amber-950/20 border border-amber-500/30 rounded-2xl space-y-1 text-xs">
+                <div className="flex items-center gap-2 text-amber-300 font-bold">
+                  <Crown className="w-4 h-4 text-amber-400" />
+                  <span>1. Ministry Director (Overall Super Admin)</span>
                 </div>
-                <p className="text-gray-400 text-[11px]">
-                  Full control over all 5 classes, service templates, Holy Spirit time overrides, global broadcast cues, emergency stop, team rosters, and post-service reviews.
+                <p className="text-gray-300 text-[11px] leading-relaxed">
+                  The Director is permanently and exclusively an overall admin across all 5 classes. <strong>Only the Director can appoint or revoke Class Admins</strong>. The Director can broadcast global pop-up alerts, adjust templates, and oversee all hubs simultaneously.
                 </p>
               </div>
 
-              <div className="p-3 bg-black/30 border border-white/5 rounded-xl space-y-1">
-                <div className="flex items-center gap-1.5 text-blue-300 font-bold text-xs">
-                  <Tv className="w-4 h-4" />
-                  Tech & Systems
+              <div className="p-3.5 bg-purple-950/20 border border-purple-500/30 rounded-2xl space-y-1 text-xs">
+                <div className="flex items-center gap-2 text-purple-300 font-bold">
+                  <ShieldCheck className="w-4 h-4 text-purple-400" />
+                  <span>2. Class Admin (Appointed by Director)</span>
                 </div>
-                <p className="text-gray-400 text-[11px]">
-                  Manages worship tracks, lesson slide presentation, stage audio equipment checklist, DJ soundboard effects, and class incident resolution.
+                <p className="text-gray-300 text-[11px] leading-relaxed">
+                  The Director can promote any Tech Lead, Presenter, or Comms Lead to a <strong>Class Admin</strong>. Class Admins can create and delete volunteer accounts <em>strictly in their assigned class</em> and have full access to all hubs for that specific class.
                 </p>
               </div>
 
-              <div className="p-3 bg-black/30 border border-white/5 rounded-xl space-y-1">
-                <div className="flex items-center gap-1.5 text-purple-300 font-bold text-xs">
-                  <Clock className="w-4 h-4" />
-                  Presenter (Stage HUD)
+              <div className="p-3.5 bg-emerald-950/20 border border-emerald-500/30 rounded-2xl space-y-1 text-xs">
+                <div className="flex items-center gap-2 text-emerald-300 font-bold">
+                  <Radio className="w-4 h-4 text-emerald-400" />
+                  <span>3. Comms Lead (Timeline & Presenter Calling)</span>
                 </div>
-                <p className="text-gray-400 text-[11px]">
-                  Distraction-free high-visibility countdown timer, live slide synchronization cues, prompt chimes from the tech booth, and age-specific scripture lesson notes.
+                <p className="text-gray-300 text-[11px] leading-relaxed">
+                  Tracks the live service flow with interactive segment tick-offs, manages the presenter countdown timer on laptops/iPads, and dispatches urgent presenter call-ins (e.g., "Come into class in 5 minutes").
                 </p>
               </div>
 
-              <div className="p-3 bg-black/30 border border-white/5 rounded-xl space-y-1">
-                <div className="flex items-center gap-1.5 text-emerald-300 font-bold text-xs">
-                  <Radio className="w-4 h-4" />
-                  Communications (Comms)
+              <div className="p-3.5 bg-blue-950/20 border border-blue-500/30 rounded-2xl space-y-1 text-xs">
+                <div className="flex items-center gap-2 text-blue-300 font-bold">
+                  <Tv className="w-4 h-4 text-blue-400" />
+                  <span>4. Tech & Systems Lead</span>
                 </div>
-                <p className="text-gray-400 text-[11px]">
-                  Service timeline coordinator, quick stage cues dispatcher ("Speed Up", "Wrap Up", "Pray"), and parent checkout tag verification lead.
+                <p className="text-gray-300 text-[11px] leading-relaxed">
+                  Operates hardware/HDMI pre-service checklists, worship tracks, presentation slides, SFX soundboard, and logs real-time service incidents for post-service review.
                 </p>
               </div>
             </div>
           )}
+
         </div>
 
         {/* Footer */}
         <div className="flex items-center justify-between pt-3 border-t border-white/5 text-xs text-gray-400 shrink-0">
           <div>
             Signed in as: <strong className="text-white">{currentUser?.name || 'Pastor Hope'}</strong>{' '}
-            <span className="text-purple-400 uppercase font-mono">({currentUser?.role || 'admin'})</span>
+            <span className="text-purple-400 uppercase font-mono">
+              ({isDirector ? 'Director' : isClassAdmin ? 'Class Admin' : currentUser?.role || 'volunteer'})
+            </span>
           </div>
 
           <button

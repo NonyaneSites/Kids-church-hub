@@ -1,6 +1,6 @@
 {
-  "name": "Kids Church Service Hub",
-  "description": "Real-time production hub for Kids Church communications, tech systems, presenter stage countdowns, and dynamic service flow synchronization.",
+  "name": "CRC KIDS CHURCH Johannesburg",
+  "description": "Central production & real-time service command hub for CRC KIDS CHURCH Johannesburg across all 5 class hubs.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

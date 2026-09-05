@@ -14,6 +14,8 @@ import { AuthModal } from './components/AuthModal';
 import { SignInGate } from './components/SignInGate';
 import { IncidentRealtimeToast } from './components/IncidentRealtimeToast';
 import { ServiceTemplateEditor } from './components/ServiceTemplateEditor';
+import { DirectorAnnouncementPopup, DirectorComposeModal } from './components/DirectorAnnouncementPopup';
+import { MobileAppView } from './components/MobileAppView';
 import { 
   ShieldAlert, 
   Sparkles, 
@@ -24,7 +26,9 @@ import {
   CheckCircle2, 
   X,
   Volume2,
-  Globe
+  Globe,
+  Megaphone,
+  Smartphone
 } from 'lucide-react';
 
 export default function App() {
@@ -32,8 +36,15 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<string>('comms');
   const [isHolySpiritModalOpen, setIsHolySpiritModalOpen] = useState<boolean>(false);
   const [isMobileSimulatorOpen, setIsMobileSimulatorOpen] = useState<boolean>(false);
+  const [isMobileMode, setIsMobileMode] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth < 768;
+    }
+    return false;
+  });
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [authModalInitialTab, setAuthModalInitialTab] = useState<'quick_switch' | 'login' | 'register' | 'manage' | 'permissions'>('quick_switch');
+  const [isDirectorComposeOpen, setIsDirectorComposeOpen] = useState<boolean>(false);
 
   const {
     authUser,
@@ -86,6 +97,14 @@ export default function App() {
     registeredAccounts,
     addNewAccount,
     deleteUserAccount,
+    clearAllDefaultAccounts,
+    resetDefaultAccounts,
+    promoteToClassAdmin,
+    revokeClassAdmin,
+    removeTeamMember,
+    activeDirectorAnnouncement,
+    sendDirectorAnnouncement,
+    dismissDirectorAnnouncement,
     broadcastCueToAllClasses,
     sendCueToClass,
   } = useServiceSync(activeRole);
@@ -154,30 +173,78 @@ export default function App() {
         onResolve={resolveIncident}
       />
 
-      {/* Top Main Navigation Bar with Interactive Class Switcher */}
-      <Navbar
-        activeRole={activeRole}
-        setActiveRole={handleRoleChange}
-        onOpenHolySpiritModal={() => setIsHolySpiritModalOpen(true)}
-        onOpenMobileSimulator={() => setIsMobileSimulatorOpen(true)}
-        onToggleEmergency={() => {
-          if (serviceState.isEmergencyActive) {
-            clearEmergency();
-          } else {
-            triggerEmergency('blank_screen', 'Emergency Screen Blanking Activated');
-          }
-        }}
-        isEmergencyActive={serviceState.isEmergencyActive}
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        currentSegment={currentSegment}
-        currentUser={authUser}
-        onOpenAuthModal={handleOpenAuthModal}
-        onLogout={logoutUser}
-        selectedClassId={selectedClassId}
-        onSelectClass={switchClassHub}
-        allClasses={allClassesConfig}
-      />
+      {isMobileMode ? (
+        <MobileAppView
+          onExitMobileMode={() => setIsMobileMode(false)}
+          authUser={authUser}
+          activeRole={activeRole}
+          onRoleChange={handleRoleChange}
+          selectedClassId={selectedClassId}
+          onSelectClass={switchClassHub}
+          currentSegment={currentSegment}
+          nextSegment={nextSegment}
+          segments={segments}
+          localTimer={localTimer}
+          startSegment={startSegment}
+          completeSegment={completeSegment}
+          checklist={checklist}
+          toggleChecklistItem={toggleChecklistItem}
+          markAllChecksDone={markAllChecksDone}
+          worshipQueue={worshipQueue}
+          setWorshipSong={setWorshipSong}
+          activeCues={activeCues}
+          sendStageCue={sendStageCue}
+          dismissCue={dismissCue}
+          teamMembers={teamMembers}
+          registeredAccounts={registeredAccounts}
+          onAddNewAccount={addNewAccount}
+          onDeleteAccount={deleteUserAccount}
+          onClearDefaultAccounts={clearAllDefaultAccounts}
+          onResetDefaultAccounts={resetDefaultAccounts}
+          onPromoteToClassAdmin={promoteToClassAdmin}
+          onRevokeClassAdmin={revokeClassAdmin}
+          onSwitchUser={switchAuthUser}
+          onOpenAuthModal={handleOpenAuthModal}
+          onOpenHolySpiritModal={() => setIsHolySpiritModalOpen(true)}
+          isEmergencyActive={serviceState.isEmergencyActive}
+          onToggleEmergency={() => {
+            if (serviceState.isEmergencyActive) {
+              clearEmergency();
+            } else {
+              triggerEmergency('blank_screen', 'Emergency Screen Blanking Activated');
+            }
+          }}
+          lessonNotes={lessonNotes}
+        />
+      ) : (
+        <>
+          {/* Top Main Navigation Bar with Interactive Class Switcher */}
+          <Navbar
+            activeRole={activeRole}
+            setActiveRole={handleRoleChange}
+            onOpenHolySpiritModal={() => setIsHolySpiritModalOpen(true)}
+            onOpenMobileSimulator={() => setIsMobileMode(true)}
+            onToggleMobileMode={() => setIsMobileMode(prev => !prev)}
+            isMobileMode={isMobileMode}
+            onToggleEmergency={() => {
+              if (serviceState.isEmergencyActive) {
+                clearEmergency();
+              } else {
+                triggerEmergency('blank_screen', 'Emergency Screen Blanking Activated');
+              }
+            }}
+            isEmergencyActive={serviceState.isEmergencyActive}
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+            currentSegment={currentSegment}
+            currentUser={authUser}
+            onOpenAuthModal={handleOpenAuthModal}
+            onLogout={logoutUser}
+            selectedClassId={selectedClassId}
+            onSelectClass={switchClassHub}
+            allClasses={allClassesConfig}
+            onOpenDirectorAnnouncement={() => setIsDirectorComposeOpen(true)}
+          />
 
       {/* Emergency Active Warning Banner */}
       {serviceState.isEmergencyActive && (
@@ -256,6 +323,7 @@ export default function App() {
             onSendCueToClass={sendCueToClass}
             currentUser={authUser}
             onOpenAuthModal={() => handleOpenAuthModal('register')}
+            onOpenDirectorAnnouncement={() => setIsDirectorComposeOpen(true)}
           />
         )}
 
@@ -316,6 +384,7 @@ export default function App() {
         {/* TAB 4: Team & Resources (with account registration & class roster) */}
         {!isTechOnly && !isPresenterOnly && !isCommsOnly && activeTab === 'team' && (
           <TeamResources
+            currentUser={authUser}
             teamMembers={teamMembers}
             lessonNotes={lessonNotes}
             incidents={incidents}
@@ -325,6 +394,10 @@ export default function App() {
             activeClassInfo={activeClassInfo}
             registeredAccounts={registeredAccounts}
             onOpenAuthModal={handleOpenAuthModal}
+            onRemoveTeamMember={removeTeamMember}
+            onDeleteAccount={deleteUserAccount}
+            onPromoteToClassAdmin={promoteToClassAdmin}
+            onRevokeClassAdmin={revokeClassAdmin}
           />
         )}
 
@@ -356,6 +429,40 @@ export default function App() {
         )}
       </main>
 
+          {/* Footer Status Bar */}
+          <footer className="h-11 bg-black/60 px-4 sm:px-6 border-t border-white/5 flex flex-wrap items-center justify-between text-[11px] text-gray-400">
+            <div className="flex items-center gap-4 py-1">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                <span className="text-[10px] font-bold tracking-widest uppercase opacity-80 text-white">5-Class Network Active</span>
+              </div>
+              <span className="hidden sm:inline text-white/20">|</span>
+              <div className="hidden sm:flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                <span className="text-[10px] font-mono uppercase opacity-60">
+                  Active: {selectedClassId === 'all' ? 'All Classes' : activeClassInfo?.name}
+                </span>
+              </div>
+              <span className="hidden md:inline text-white/20">|</span>
+              <div className="hidden md:flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                <span className="text-[10px] font-mono uppercase opacity-60">
+                  User: {authUser?.name} ({authUser?.assignedClassId === 'all' ? 'Director' : authUser?.assignedClassId?.toUpperCase()})
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-4 py-1 font-mono text-[10px]">
+              <span className="text-purple-400/80">LATENCY: 12ms</span>
+              <span className="hidden sm:inline text-white/20">|</span>
+              <span className="text-gray-400">ZERO-STREAMING MESH</span>
+              <span className="hidden sm:inline text-white/20">|</span>
+              <span className="text-emerald-400/80">BROADCAST NODE #1</span>
+            </div>
+          </footer>
+        </>
+      )}
+
       {/* Global Modals */}
       <HolySpiritModal
         isOpen={isHolySpiritModalOpen}
@@ -386,40 +493,30 @@ export default function App() {
         registeredAccounts={registeredAccounts}
         onAddNewAccount={addNewAccount}
         onDeleteAccount={deleteUserAccount}
+        onClearDefaultAccounts={clearAllDefaultAccounts}
+        onResetDefaultAccounts={resetDefaultAccounts}
+        onPromoteToClassAdmin={promoteToClassAdmin}
+        onRevokeClassAdmin={revokeClassAdmin}
         initialTab={authModalInitialTab}
       />
 
-      {/* Footer Status Bar */}
-      <footer className="h-11 bg-black/60 px-4 sm:px-6 border-t border-white/5 flex flex-wrap items-center justify-between text-[11px] text-gray-400">
-        <div className="flex items-center gap-4 py-1">
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-            <span className="text-[10px] font-bold tracking-widest uppercase opacity-80 text-white">5-Class Network Active</span>
-          </div>
-          <span className="hidden sm:inline text-white/20">|</span>
-          <div className="hidden sm:flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-green-500"></span>
-            <span className="text-[10px] font-mono uppercase opacity-60">
-              Active: {selectedClassId === 'all' ? 'All Classes' : activeClassInfo?.name}
-            </span>
-          </div>
-          <span className="hidden md:inline text-white/20">|</span>
-          <div className="hidden md:flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-            <span className="text-[10px] font-mono uppercase opacity-60">
-              User: {authUser?.name} ({authUser?.assignedClassId === 'all' ? 'Director' : authUser?.assignedClassId?.toUpperCase()})
-            </span>
-          </div>
-        </div>
+      {/* Director Global Broadcast Announcement Popup Alert (shown across classes) */}
+      <DirectorAnnouncementPopup
+        announcement={activeDirectorAnnouncement}
+        onDismiss={dismissDirectorAnnouncement}
+      />
 
-        <div className="flex items-center gap-4 py-1 font-mono text-[10px]">
-          <span className="text-purple-400/80">LATENCY: 12ms</span>
-          <span className="hidden sm:inline text-white/20">|</span>
-          <span className="text-gray-400">ZERO-STREAMING MESH</span>
-          <span className="hidden sm:inline text-white/20">|</span>
-          <span className="text-emerald-400/80">BROADCAST NODE #1</span>
-        </div>
-      </footer>
+      {/* Director Compose Global Announcement Modal */}
+      <DirectorComposeModal
+        isOpen={isDirectorComposeOpen}
+        onClose={() => setIsDirectorComposeOpen(false)}
+        onSendAnnouncement={(title, msg, targetClassId, severity) => {
+          sendDirectorAnnouncement(title, msg, targetClassId, severity);
+          setIsDirectorComposeOpen(false);
+        }}
+        defaultClassId={selectedClassId}
+        currentUserName={authUser?.name || 'Ministry Director'}
+      />
     </div>
   );
 }

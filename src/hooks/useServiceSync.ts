@@ -23,6 +23,7 @@ import {
   ClassId,
   ClassInfo,
   ClassHubData,
+  DirectorAnnouncement,
 } from '../types/hub';
 import {
   getStoredAuthUser,
@@ -36,6 +37,10 @@ import {
   getStoredAccountsList,
   saveNewAccount,
   deleteAccount,
+  clearAllSeedAccounts,
+  resetToSeedAccounts,
+  updateAccountAdminStatus,
+  updateAccountPin,
 } from '../lib/supabase';
 import { CLASSES_CONFIG, getAllDefaultClassHubs } from '../data/classHubsData';
 
@@ -343,6 +348,9 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
   // Real-time Incident Alert Popup State
   const [activeIncidentAlert, setActiveIncidentAlert] = useState<IncidentLog | null>(null);
 
+  // Director Real-time Screen Pop-up Announcement State
+  const [activeDirectorAnnouncement, setActiveDirectorAnnouncement] = useState<DirectorAnnouncement | null>(null);
+
   // Presenter notification log (ephemeral history)
   const [notifications, setNotifications] = useState<{ id: string; to: string; message: string; timestamp: string }[]>([
     { id: 'notif-1', to: 'Lebo', message: "You're up in 5 minutes", timestamp: '08:55 AM' },
@@ -504,6 +512,12 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
             const tmpls = data.payload as ServiceTemplate[];
             setServiceTemplates(tmpls);
             saveStoredTemplates(tmpls);
+            break;
+          }
+          case 'DIRECTOR_ANNOUNCEMENT': {
+            const announcement = data.payload as DirectorAnnouncement;
+            setActiveDirectorAnnouncement(announcement);
+            playCueSound(announcement.severity === 'emergency' ? 'emergency' : announcement.severity === 'important' ? 'urgent' : 'normal');
             break;
           }
         }
@@ -945,10 +959,84 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
     return updated;
   }, []);
 
-  const deleteUserAccount = useCallback((userId: string) => {
-    const updated = deleteAccount(userId);
+  const promoteToClassAdmin = useCallback((userId: string) => {
+    if (authUser.role !== 'director') {
+      alert('Permission Denied: Only a Director can grant Class Admin rights.');
+      return registeredAccounts;
+    }
+    const updated = updateAccountAdminStatus(userId, true, authUser.name || 'Pastor Hope (Director)');
     setRegisteredAccounts(updated);
     return updated;
+  }, [authUser, registeredAccounts]);
+
+  const revokeClassAdmin = useCallback((userId: string) => {
+    if (authUser.role !== 'director') {
+      alert('Permission Denied: Only a Director can revoke Class Admin rights.');
+      return registeredAccounts;
+    }
+    const updated = updateAccountAdminStatus(userId, false, authUser.name || 'Pastor Hope (Director)');
+    setRegisteredAccounts(updated);
+    return updated;
+  }, [authUser, registeredAccounts]);
+
+  const deleteUserAccount = useCallback((userId: string) => {
+    const targetUser = registeredAccounts.find((u) => u.id === userId);
+    const updated = deleteAccount(userId);
+    setRegisteredAccounts(updated);
+    if (targetUser) {
+      // Also remove from active room team members if present
+      setTeamMembers((prev) => prev.filter((m) => m.id !== userId && m.name !== targetUser.name));
+    }
+    return updated;
+  }, [registeredAccounts]);
+
+  const clearAllDefaultAccounts = useCallback(() => {
+    const updated = clearAllSeedAccounts();
+    setRegisteredAccounts(updated);
+    return updated;
+  }, []);
+
+  const resetDefaultAccounts = useCallback(() => {
+    const updated = resetToSeedAccounts();
+    setRegisteredAccounts(updated);
+    return updated;
+  }, []);
+
+  const removeTeamMember = useCallback((memberId: string) => {
+    const isDirector = authUser.role === 'director' || (authUser.role === 'admin' && authUser.assignedClassId === 'all');
+    const isClassAdmin = authUser.isClassAdmin || authUser.role === 'admin';
+    if (!isDirector && !isClassAdmin) {
+      alert('Permission Denied: Only a Director or the assigned Class Admin can remove team members from this class.');
+      return;
+    }
+    setTeamMembers((prev) => prev.filter((m) => m.id !== memberId));
+  }, [authUser]);
+
+  // Director Global Pop-up Announcement
+  const sendDirectorAnnouncement = useCallback((
+    title: string,
+    message: string,
+    severity: 'normal' | 'important' | 'emergency' = 'important',
+    targetClassId: ClassId | 'all' = 'all'
+  ) => {
+    const announcement: DirectorAnnouncement = {
+      id: `ann_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      title,
+      message,
+      senderName: authUser.name || 'Pastor Hope (Director)',
+      senderRoleTitle: authUser.roleTitle || 'Kids Ministry Director',
+      targetClassId,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      severity,
+    };
+    setActiveDirectorAnnouncement(announcement);
+    dispatchBroadcast('DIRECTOR_ANNOUNCEMENT', announcement);
+    playCueSound(severity === 'emergency' ? 'emergency' : severity === 'important' ? 'urgent' : 'normal');
+    return announcement;
+  }, [authUser, dispatchBroadcast, playCueSound]);
+
+  const dismissDirectorAnnouncement = useCallback(() => {
+    setActiveDirectorAnnouncement(null);
   }, []);
 
   const logoutUser = useCallback(() => {
@@ -1289,6 +1377,14 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
     registeredAccounts,
     addNewAccount,
     deleteUserAccount,
+    clearAllDefaultAccounts,
+    resetDefaultAccounts,
+    promoteToClassAdmin,
+    revokeClassAdmin,
+    removeTeamMember,
+    activeDirectorAnnouncement,
+    sendDirectorAnnouncement,
+    dismissDirectorAnnouncement,
     broadcastCueToAllClasses,
     sendCueToClass,
   };

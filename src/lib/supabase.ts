@@ -48,6 +48,8 @@ export const PRECONFIGURED_USERS: AuthUser[] = [
     assignedClassId: 'all',
     avatarColor: 'from-purple-600 to-indigo-600',
     phone: '+27 82 555 0192',
+    pin: '2026',
+    isClassAdmin: true,
     isAuthenticated: true,
   },
   {
@@ -59,6 +61,8 @@ export const PRECONFIGURED_USERS: AuthUser[] = [
     assignedClassId: 'jy',
     avatarColor: 'from-blue-500 to-cyan-600',
     phone: '+27 83 444 5512',
+    pin: '2026',
+    isClassAdmin: false,
     isAuthenticated: true,
   },
   {
@@ -70,17 +74,22 @@ export const PRECONFIGURED_USERS: AuthUser[] = [
     assignedClassId: 'kb',
     avatarColor: 'from-purple-500 to-indigo-600',
     phone: '+27 71 333 8821',
+    pin: '2026',
+    isClassAdmin: false,
     isAuthenticated: true,
   },
   {
     id: 'usr-comms-tb',
     email: 'comms.tb@crc.church',
     name: 'Nomsa Khumalo',
-    role: 'admin',
-    roleTitle: 'TRAILBLAZERS Class Admin',
+    role: 'comms',
+    roleTitle: 'TRAILBLAZERS Comms & Class Admin',
     assignedClassId: 'tb',
     avatarColor: 'from-pink-500 to-rose-600',
     phone: '+27 84 222 4490',
+    pin: '2026',
+    isClassAdmin: true,
+    isAdminPromotedBy: 'Pastor Hope (Director)',
     isAuthenticated: true,
   },
   {
@@ -92,6 +101,9 @@ export const PRECONFIGURED_USERS: AuthUser[] = [
     assignedClassId: 'la-orange',
     avatarColor: 'from-orange-500 to-amber-600',
     phone: '+27 72 111 7711',
+    pin: '2026',
+    isClassAdmin: true,
+    isAdminPromotedBy: 'Pastor Hope (Director)',
     isAuthenticated: true,
   },
   {
@@ -103,90 +115,107 @@ export const PRECONFIGURED_USERS: AuthUser[] = [
     assignedClassId: 'la-yellow',
     avatarColor: 'from-yellow-500 to-amber-600',
     phone: '+27 73 999 3329',
+    pin: '2026',
+    isClassAdmin: false,
     isAuthenticated: true,
   },
   {
     id: 'usr-guest',
     email: 'guest@crc.church',
     name: 'Guest Volunteer',
-    role: 'presenter',
-    roleTitle: 'Guest Presenter (Stage HUD)',
+    role: 'volunteer',
+    roleTitle: 'Guest Volunteer / Observer',
     assignedClassId: 'kb',
     avatarColor: 'from-gray-600 to-slate-700',
     phone: '+27 82 000 1234',
+    pin: '2026',
+    isClassAdmin: false,
     isAuthenticated: true,
   },
 ];
 
-const LOCAL_USERS_STORAGE_KEY = 'kids_church_registered_users_v3';
-const SEED_CLEARED_FLAG_KEY = 'kids_church_seed_users_cleared';
+const LOCAL_USERS_STORAGE_KEY = 'kids_church_registered_users_v4';
+const SEED_CLEARED_FLAG_KEY = 'kids_church_seed_users_cleared_v4';
+const DELETED_USERS_STORAGE_KEY = 'kids_church_deleted_users_v4';
 
-export function clearAllSeedAccounts(): void {
+function getDeletedUserIds(): string[] {
   try {
-    localStorage.setItem(SEED_CLEARED_FLAG_KEY, 'true');
-    localStorage.setItem(LOCAL_USERS_STORAGE_KEY, JSON.stringify([]));
+    const raw = localStorage.getItem(DELETED_USERS_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
   } catch (e) {
-    console.error('Failed to clear seed accounts:', e);
+    return [];
   }
 }
 
-export function resetToSeedAccounts(): AuthUser[] {
-  try {
-    localStorage.removeItem(SEED_CLEARED_FLAG_KEY);
-    localStorage.setItem(LOCAL_USERS_STORAGE_KEY, JSON.stringify(PRECONFIGURED_USERS));
-  } catch (e) {
-    console.error('Failed to reset seed accounts:', e);
-  }
-  return PRECONFIGURED_USERS;
-}
+
+
+import {
+  dbGetAccounts,
+  dbSaveAccount,
+  dbDeleteAccount,
+  dbClearDefaultAccounts,
+  dbResetDefaultAccounts,
+  syncToIndexedDB,
+} from './database';
 
 export function getStoredAccountsList(): AuthUser[] {
-  try {
-    const isSeedCleared = localStorage.getItem(SEED_CLEARED_FLAG_KEY) === 'true';
-    const raw = localStorage.getItem(LOCAL_USERS_STORAGE_KEY);
-    if (!raw) {
-      return isSeedCleared ? [] : PRECONFIGURED_USERS;
-    }
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) {
-      if (isSeedCleared) {
-        return parsed;
-      }
-      // Merge preconfigured users if not present and not cleared
-      const combined = [...parsed];
-      for (const pre of PRECONFIGURED_USERS) {
-        if (!combined.some(u => u.email === pre.email || u.id === pre.id)) {
-          combined.push(pre);
-        }
-      }
-      return combined;
-    }
-  } catch (e) {
-    console.warn('Error reading stored accounts:', e);
-  }
-  return PRECONFIGURED_USERS;
+  return dbGetAccounts();
 }
 
 export function saveNewAccount(newUser: AuthUser): AuthUser[] {
+  return dbSaveAccount(newUser);
+}
+
+export function deleteAccount(userId: string): AuthUser[] {
+  return dbDeleteAccount(userId);
+}
+
+export function clearAllSeedAccounts(): AuthUser[] {
+  return dbClearDefaultAccounts();
+}
+
+export function resetToSeedAccounts(): AuthUser[] {
+  return dbResetDefaultAccounts();
+}
+
+export function updateAccountAdminStatus(
+  userId: string,
+  isClassAdmin: boolean,
+  promotedByName: string
+): AuthUser[] {
   try {
     const list = getStoredAccountsList();
-    const updated = [newUser, ...list.filter(u => u.id !== newUser.id && u.email !== newUser.email)];
+    const updated = list.map((user) => {
+      if (user.id === userId) {
+        return {
+          ...user,
+          isClassAdmin,
+          isAdminPromotedBy: isClassAdmin ? promotedByName : undefined,
+        };
+      }
+      return user;
+    });
     localStorage.setItem(LOCAL_USERS_STORAGE_KEY, JSON.stringify(updated));
     return updated;
   } catch (e) {
-    console.error('Failed to save account:', e);
+    console.error('Failed to update account admin status:', e);
     return getStoredAccountsList();
   }
 }
 
-export function deleteAccount(userId: string): AuthUser[] {
+export function updateAccountPin(userId: string, pin: string): AuthUser[] {
   try {
     const list = getStoredAccountsList();
-    const updated = list.filter(u => u.id !== userId);
+    const updated = list.map((user) => {
+      if (user.id === userId) {
+        return { ...user, pin };
+      }
+      return user;
+    });
     localStorage.setItem(LOCAL_USERS_STORAGE_KEY, JSON.stringify(updated));
     return updated;
   } catch (e) {
-    console.error('Failed to delete account:', e);
+    console.error('Failed to update pin:', e);
     return getStoredAccountsList();
   }
 }
@@ -482,9 +511,10 @@ export function saveStoredTemplates(templates: ServiceTemplate[]): void {
   }
 }
 
-// -------------------------------------------------------------
-// SUPABASE REALTIME HELPER FOR INCIDENT LOGS BROADCAST
-// -------------------------------------------------------------
+// Re-export persistent database accounts engine
+// Re-export database status helper
+export { getDatabaseStatus } from './database';
+
 export function broadcastIncidentRealtime(event: RealtimeIncidentEvent): void {
   const supabase = getSupabaseClient();
   if (supabase) {
