@@ -20,7 +20,7 @@ import {
 } from '../types/hub';
 
 interface PresenterModeProps {
-  currentSegment: ServiceSegment;
+  currentSegment: ServiceSegment | null;
   nextSegment: ServiceSegment | null;
   localTimer: {
     remainingSeconds: number;
@@ -137,9 +137,11 @@ export const PresenterMode: React.FC<PresenterModeProps> = ({
           </div>
           <div>
             <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-purple-400 block mb-0.5">
-              PRESENTER STAGE VIEW • {currentSegment.assignedLead}
+              PRESENTER STAGE VIEW • {currentSegment?.assignedLead || 'Standing By'}
             </span>
-            <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">{currentSegment.title}</h2>
+            <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+              {currentSegment?.title || 'Waiting for Service to Begin'}
+            </h2>
           </div>
         </div>
 

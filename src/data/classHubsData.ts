@@ -535,13 +535,58 @@ export function createDefaultClassHubData(classId: ClassId): ClassHubData {
   }
 }
 
-export function getAllDefaultClassHubs(): Record<ClassId, ClassHubData> {
+export function createBlankClassHubData(classId: ClassId): ClassHubData {
+  const conf = CLASSES_CONFIG.find((c) => c.id === classId) || CLASSES_CONFIG[0];
   return {
-    jy: createDefaultClassHubData('jy'),
-    tb: createDefaultClassHubData('tb'),
-    kb: createDefaultClassHubData('kb'),
-    'la-orange': createDefaultClassHubData('la-orange'),
-    'la-yellow': createDefaultClassHubData('la-yellow'),
-    all: createDefaultClassHubData('kb'), // fallback base
+    classId,
+    serviceState: {
+      serviceId: `srv-${classId}`,
+      serviceName: `${conf.name} Hub`,
+      date: '',
+      theme: '',
+      currentSegmentId: null,
+      targetEndTime: null,
+      targetDurationSeconds: 0,
+      isPaused: false,
+      lastUpdated: new Date().toISOString(),
+      currentSlideIndex: 0,
+      totalSlides: 0,
+      activeWorshipSongId: null,
+      isEmergencyActive: false,
+      activeEmergencyType: null,
+    },
+    segments: [], // Clean blank state: Class Admin creates timeline progress
+    checklist: [], // Clean blank state: Class Admin creates tech checklist
+    worshipQueue: [],
+    activeCues: [],
+    incidents: [],
+    lessonNotes: {
+      title: '',
+      mainScripture: '',
+      keyPoint: '',
+      memoryVerse: '',
+      illustrationGame: '',
+      slidesCount: 0,
+      notes: [],
+    },
+    teamMembers: [],
+    reviewData: {
+      ratings: { equipment: 0, timing: 0, communication: 0, kidsEngagement: 0, holySpiritFlow: 0, overall: 0 },
+      whatWentWell: '',
+      notes: '',
+    },
+    prayerRequests: [],
   };
 }
+
+export function getAllDefaultClassHubs(): Record<ClassId, ClassHubData> {
+  return {
+    jy: createBlankClassHubData('jy'),
+    tb: createBlankClassHubData('tb'),
+    kb: createBlankClassHubData('kb'),
+    'la-orange': createBlankClassHubData('la-orange'),
+    'la-yellow': createBlankClassHubData('la-yellow'),
+    all: createBlankClassHubData('kb'), // fallback base
+  };
+}
+

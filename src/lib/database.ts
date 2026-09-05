@@ -6,9 +6,9 @@ const DB_VERSION = 1;
 const STORE_ACCOUNTS = 'accounts';
 const STORE_META = 'metadata';
 
-const LOCAL_STORAGE_ACCOUNTS_KEY = 'crc_kids_church_accounts_db_v5';
-const LOCAL_STORAGE_DELETED_KEY = 'crc_kids_church_deleted_accounts_v5';
-const LOCAL_STORAGE_CLEARED_FLAG = 'crc_kids_church_seed_cleared_v5';
+const LOCAL_STORAGE_ACCOUNTS_KEY = 'crc_kids_church_accounts_db_v6';
+const LOCAL_STORAGE_DELETED_KEY = 'crc_kids_church_deleted_accounts_v6';
+const LOCAL_STORAGE_CLEARED_FLAG = 'crc_kids_church_seed_cleared_v6';
 
 // Track deleted account IDs and emails permanently
 function getPermanentlyDeletedKeys(): { ids: string[]; emails: string[] } {

@@ -24,6 +24,9 @@ import {
   ClassInfo,
   ClassHubData,
   DirectorAnnouncement,
+  CalendarEvent,
+  QuickStagePreset,
+  CommsEmergencyAlert,
 } from '../types/hub';
 import {
   getStoredAuthUser,
@@ -44,185 +47,61 @@ import {
 } from '../lib/supabase';
 import { CLASSES_CONFIG, getAllDefaultClassHubs } from '../data/classHubsData';
 
-// Seed initial service segments based on mockup
-const INITIAL_SEGMENTS: ServiceSegment[] = [
-  {
-    id: 'seg-1',
-    order: 1,
-    title: 'Welcome',
-    plannedStartTime: '08:30 AM',
-    durationMinutes: 10,
-    assignedLead: 'Pastor Hope',
-    assignedRole: 'Teacher',
-    status: 'completed',
-    notes: 'High energy welcome, welcome new first-time kids & high fives',
-  },
-  {
-    id: 'seg-2',
-    order: 2,
-    title: 'Praise & Worship',
-    plannedStartTime: '08:40 AM',
-    durationMinutes: 20,
-    assignedLead: 'Sarah',
-    assignedRole: 'Worship Leader',
-    status: 'completed',
-    notes: 'Praise songs with action motions, prepare for memory verse',
-  },
-  {
-    id: 'seg-3',
-    order: 3,
-    title: 'Memory Verse',
-    plannedStartTime: '09:00 AM',
-    durationMinutes: 15,
-    assignedLead: 'Lebo',
-    assignedRole: 'Presenter',
-    status: 'in_progress',
-    keyScripture: '1 Timothy 5:22 (TPT)',
-    notes: 'Break kids into groups for reciting game with visual cue slides',
-    slideRange: [1, 14],
-  },
-  {
-    id: 'seg-4',
-    order: 4,
-    title: 'Offering',
-    plannedStartTime: '09:15 AM',
-    durationMinutes: 10,
-    assignedLead: 'Thabo',
-    assignedRole: 'Tech & Host',
-    status: 'upcoming',
-    notes: 'Kids giving animation video & short giving prayer',
-  },
-  {
-    id: 'seg-5',
-    order: 5,
-    title: 'Lesson: David & Goliath',
-    plannedStartTime: '09:25 AM',
-    durationMinutes: 30,
-    assignedLead: 'Lebo',
-    assignedRole: 'Presenter',
-    status: 'upcoming',
-    keyScripture: '1 Samuel 17:45-47',
-    notes: 'Main story, Giant Ball interactive illustration game',
-    slideRange: [15, 23],
-  },
-  {
-    id: 'seg-6',
-    order: 6,
-    title: 'Small Groups',
-    plannedStartTime: '09:55 AM',
-    durationMinutes: 15,
-    assignedLead: 'Small Group Leaders',
-    assignedRole: '8 Leaders',
-    status: 'upcoming',
-    notes: 'Discussion cards, activity sheet & prayer in circles',
-  },
-  {
-    id: 'seg-7',
-    order: 7,
-    title: 'Salvation & Ministry',
-    plannedStartTime: '10:10 AM',
-    durationMinutes: 10,
-    assignedLead: 'Pastor Hope',
-    assignedRole: 'Teacher',
-    status: 'upcoming',
-    notes: 'Altar call, soft instrumental pad playing',
-  },
-  {
-    id: 'seg-8',
-    order: 8,
-    title: 'Announcements',
-    plannedStartTime: '10:20 AM',
-    durationMinutes: 10,
-    assignedLead: 'Pastor Hope',
-    assignedRole: 'Teacher',
-    status: 'upcoming',
-    notes: 'Dream Week next session reminders & prize draw',
-  },
-  {
-    id: 'seg-9',
-    order: 9,
-    title: 'Dismissal & Parents Pick-up',
-    plannedStartTime: '10:30 AM',
-    durationMinutes: 15,
-    assignedLead: 'Nomsa',
-    assignedRole: 'Comms',
-    status: 'upcoming',
-    notes: 'Match security tags with parent checkout QR',
-  },
-];
+// Persistent storage keys
+const LOCAL_CLASS_HUBS_KEY = 'kids_church_multi_class_hubs_v6';
+const LOCAL_CALENDAR_KEY = 'kids_church_calendar_events_v6';
+const LOCAL_QUICK_PRESETS_KEY = 'kids_church_quick_cues_presets_v6';
+const LOCAL_PRAYERS_KEY = 'kids_church_saved_prayers_v6';
+const LOCAL_MONDAY_RESET_KEY = 'kids_church_last_monday_reset_v6';
 
-const INITIAL_CHECKLIST: PreServiceCheckItem[] = [
-  { id: 'chk-1', label: 'TV / Screens', statusText: 'Connected', isChecked: true, category: 'hardware' },
-  { id: 'chk-2', label: 'HDMI / Cables', statusText: 'Working', isChecked: true, category: 'hardware' },
-  { id: 'chk-3', label: 'Clicker / Remote', statusText: 'Charged', isChecked: true, category: 'hardware' },
-  { id: 'chk-4', label: 'Mic / Batteries', statusText: 'Checked', isChecked: true, category: 'audio' },
-  { id: 'chk-5', label: 'Laptop', statusText: 'Charging', isChecked: true, category: 'hardware' },
-  { id: 'chk-6', label: 'Songs Loaded', statusText: 'Done', isChecked: true, category: 'media' },
-  { id: 'chk-7', label: 'Lesson Slides', statusText: 'Loaded', isChecked: true, category: 'media' },
-  { id: 'chk-8', label: 'Videos Tested', statusText: 'Done', isChecked: true, category: 'media' },
-  { id: 'chk-9', label: 'Background Music', statusText: 'Ready', isChecked: true, category: 'audio' },
-];
-
-const INITIAL_WORSHIP_QUEUE: WorshipSong[] = [
-  { id: 'song-1', order: 1, title: 'Open The Eyes', artist: 'Newsboys', duration: '03:48', durationSeconds: 228, isPlaying: false, bpm: 110 },
-  { id: 'song-2', order: 2, title: 'Way Maker', artist: 'Sinach', duration: '04:50', durationSeconds: 290, isPlaying: true, bpm: 68 },
-  { id: 'song-3', order: 3, title: 'Praise Medley', artist: 'Various Artists', duration: '06:20', durationSeconds: 380, isPlaying: false, bpm: 128 },
-];
-
-const INITIAL_INCIDENTS: IncidentLog[] = [
-  { id: 'inc-1', time: '08:43 AM', description: 'Mic 2 battery low (< 20%)', status: 'resolved', severity: 'medium', resolvedAt: '08:46 AM', reportedBy: 'Thabo (Tech)' },
-  { id: 'inc-2', time: '09:02 AM', description: 'HDMI switched to backup port 2', status: 'resolved', severity: 'low', resolvedAt: '09:03 AM', reportedBy: 'Thabo (Tech)' },
-];
-
-const INITIAL_TEAM: TeamMember[] = [
-  { id: 'team-1', name: 'Pastor Hope', roleTitle: 'Teacher / Director', roleType: 'admin', avatarColor: 'from-amber-500 to-orange-600', isOnline: true, phone: '+1 (555) 019-2834' },
-  { id: 'team-2', name: 'Lebo', roleTitle: 'Lesson Presenter', roleType: 'presenter', avatarColor: 'from-purple-500 to-indigo-600', isOnline: true, phone: '+1 (555) 019-8821' },
-  { id: 'team-3', name: 'Sarah', roleTitle: 'Worship Leader', roleType: 'tech', avatarColor: 'from-pink-500 to-rose-600', isOnline: true, phone: '+1 (555) 019-3342' },
-  { id: 'team-4', name: 'Nomsa', roleTitle: 'Communications Lead', roleType: 'comms', avatarColor: 'from-emerald-500 to-teal-600', isOnline: true, phone: '+1 (555) 019-4490' },
-  { id: 'team-5', name: 'Thabo', roleTitle: 'Tech & Systems Master', roleType: 'tech', avatarColor: 'from-blue-500 to-cyan-600', isOnline: true, phone: '+1 (555) 019-5512' },
-  { id: 'team-6', name: 'Small Group Team', roleTitle: '8 Group Leaders', roleType: 'admin', avatarColor: 'from-violet-500 to-purple-600', isOnline: true },
-];
-
+// Pristine blank initial state - Class Admin creates accounts, checklist, timeline, calendar, and quick cues
+const INITIAL_SEGMENTS: ServiceSegment[] = [];
+const INITIAL_CHECKLIST: PreServiceCheckItem[] = [];
+const INITIAL_WORSHIP_QUEUE: WorshipSong[] = [];
+const INITIAL_INCIDENTS: IncidentLog[] = [];
+const INITIAL_TEAM: TeamMember[] = [];
 const INITIAL_LESSON: LessonNotesData = {
-  title: 'David & Goliath',
-  mainScripture: '1 Samuel 17:45-47',
-  keyPoint: 'God gives us the strength to face any giant.',
-  memoryVerse: '1 Timothy 5:22 (TPT) "Keep yourself pure and holy with your standards high."',
-  illustrationGame: 'Giant Ball Challenge (Throw foam balls at cardboard Goliath target)',
-  slidesCount: 23,
-  notes: [
-    'Remind kids that Goliath was over 9 feet tall!',
-    'David only needed 1 smooth stone because God was on his side.',
-    'Ask 3 volunteers from junior and senior groups for the Memory Verse recitation.',
-  ],
+  title: '',
+  mainScripture: '',
+  keyPoint: '',
+  memoryVerse: '',
+  illustrationGame: '',
+  slidesCount: 0,
+  notes: [],
 };
-
 const INITIAL_REVIEW: ServiceReviewData = {
   ratings: {
-    equipment: 5,
-    timing: 4,
-    communication: 5,
-    kidsEngagement: 5,
-    holySpiritFlow: 5,
-    overall: 5,
+    equipment: 0,
+    timing: 0,
+    communication: 0,
+    kidsEngagement: 0,
+    holySpiritFlow: 0,
+    overall: 0,
   },
-  whatWentWell: 'The worship time was powerful! Kids recited memory verse with high enthusiasm.',
-  notes: 'Recommend charging backup wireless mic batteries on Saturday evening.',
+  whatWentWell: '',
+  notes: '',
 };
 
-const INITIAL_PRAYERS: PrayerRequest[] = [
-  { id: 'p-1', author: 'Pastor Hope', text: 'Wisdom for next session leaders & energy for volunteers', timestamp: '08:15 AM', isAnswered: false, category: 'team' },
-  { id: 'p-2', author: 'Nomsa', text: 'More volunteers for Sunday check-in desks', timestamp: '08:45 AM', isAnswered: false, category: 'service' },
-  { id: 'p-3', author: 'Sarah', text: 'Kids to encounter Jesus deeply during worship today', timestamp: '09:05 AM', isAnswered: true, category: 'kids' },
+export const DEFAULT_QUICK_PRESETS: QuickStagePreset[] = [
+  { id: 'qp-1', label: 'Wrap Up (1 Min)', message: 'Please wrap up this point (1 min remaining)', priority: 'urgent', color: 'amber' },
+  { id: 'qp-2', label: 'Mic Closer', message: 'Hold microphone closer to mouth', priority: 'urgent', color: 'purple' },
+  { id: 'qp-3', label: 'Slow Down', message: 'Slow down pacing for kids understanding', priority: 'normal', color: 'blue' },
+  { id: 'qp-4', label: 'Speed Up', message: 'Pick up pace to stay on schedule', priority: 'normal', color: 'orange' },
+  { id: 'qp-5', label: 'Pray / Response', message: 'Lead into altar/prayer response moment', priority: 'normal', color: 'emerald' },
+  { id: 'qp-6', label: 'Finish Segment', message: 'Transition to next item now', priority: 'urgent', color: 'rose' },
 ];
+
+export function getMostRecentMonday(): string {
+  const now = new Date();
+  const day = now.getDay(); // 0 is Sunday, 1 is Monday
+  const diff = (day + 6) % 7; // days since last Monday
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - diff);
+  return monday.toISOString().split('T')[0];
+}
 
 const CHANNEL_NAME = 'kids_church_service_hub_channel';
 
-// Helper to compute initial targetEndTime (set ~3 mins 42 sec remaining for Memory Verse as in mockup)
-function getMockInitialEndTime(): string {
-  const target = new Date(Date.now() + (3 * 60 + 42) * 1000);
-  return target.toISOString();
-}
 
 export function useServiceSync(activeRoleProp: Role = 'admin') {
   // Authentication & Role State
@@ -234,7 +113,7 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
   // Multi-Class Hubs Master State
   const [allClassHubs, setAllClassHubs] = useState<Record<ClassId, ClassHubData>>(() => {
     try {
-      const saved = localStorage.getItem('kids_church_multi_class_hubs_v2');
+      const saved = localStorage.getItem(LOCAL_CLASS_HUBS_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed && parsed.jy && parsed.tb && parsed.kb && parsed['la-orange'] && parsed['la-yellow']) {
@@ -265,20 +144,20 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
   const activeHubKey: ClassId = selectedClassId === 'all' ? 'kb' : selectedClassId;
   const initialHubData = allClassHubs[activeHubKey] || allClassHubs.kb;
 
-  // Active Service State for the current room
+  // Active Service State for the current room (starts blank / unstarted)
   const [serviceState, setServiceState] = useState<ServiceState>(() => initialHubData?.serviceState || {
-    serviceId: 'srv-dreamweek-day3',
-    serviceName: 'Dream Week Conference CRC',
-    date: 'Wed, June 18, 2026',
-    theme: 'Bigger Together',
-    currentSegmentId: 'seg-3',
-    targetEndTime: getMockInitialEndTime(),
-    targetDurationSeconds: 15 * 60,
+    serviceId: 'srv-' + Date.now(),
+    serviceName: 'Sunday Service',
+    date: new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }),
+    theme: '',
+    currentSegmentId: null,
+    targetEndTime: null,
+    targetDurationSeconds: 0,
     isPaused: false,
     lastUpdated: new Date().toISOString(),
-    currentSlideIndex: 14,
-    totalSlides: 23,
-    activeWorshipSongId: 'song-2',
+    currentSlideIndex: 1,
+    totalSlides: 1,
+    activeWorshipSongId: null,
     isEmergencyActive: false,
     activeEmergencyType: null,
   });
@@ -291,7 +170,36 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>(() => initialHubData?.teamMembers || INITIAL_TEAM);
   const [lessonNotes, setLessonNotes] = useState<LessonNotesData>(() => initialHubData?.lessonNotes || INITIAL_LESSON);
   const [reviewData, setReviewData] = useState<ServiceReviewData>(() => initialHubData?.reviewData || INITIAL_REVIEW);
-  const [prayerRequests, setPrayerRequests] = useState<PrayerRequest[]>(() => initialHubData?.prayerRequests || INITIAL_PRAYERS);
+  
+  // Permanent Saved Prayer Requests (Never wiped on Monday reset)
+  const [prayerRequests, setPrayerRequests] = useState<PrayerRequest[]>(() => {
+    try {
+      const saved = localStorage.getItem(LOCAL_PRAYERS_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return initialHubData?.prayerRequests || [];
+  });
+
+  // Calendar Events (Configured by Class Admin)
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>(() => {
+    try {
+      const saved = localStorage.getItem(LOCAL_CALENDAR_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return [];
+  });
+
+  // Quick Stage Cues / Presets (Configured by Class Admin)
+  const [quickStagePresets, setQuickStagePresets] = useState<QuickStagePreset[]>(() => {
+    try {
+      const saved = localStorage.getItem(LOCAL_QUICK_PRESETS_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return DEFAULT_QUICK_PRESETS;
+  });
+
+  // Active Emergency Alerts from Comms (Comms is the primary communicator)
+  const [commsEmergencyAlerts, setCommsEmergencyAlerts] = useState<CommsEmergencyAlert[]>([]);
 
   // Active class configuration helper
   const activeClassInfo = useMemo(() => {
@@ -322,7 +230,7 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
         [hubKey]: updatedHub,
       };
       try {
-        localStorage.setItem('kids_church_multi_class_hubs_v2', JSON.stringify(updatedAll));
+        localStorage.setItem(LOCAL_CLASS_HUBS_KEY, JSON.stringify(updatedAll));
       } catch (e) {
         console.warn('Error persisting class hubs:', e);
       }
@@ -342,6 +250,27 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
     prayerRequests,
   ]);
 
+  // Save prayer requests permanently
+  useEffect(() => {
+    try {
+      localStorage.setItem(LOCAL_PRAYERS_KEY, JSON.stringify(prayerRequests));
+    } catch (e) {}
+  }, [prayerRequests]);
+
+  // Save calendar events
+  useEffect(() => {
+    try {
+      localStorage.setItem(LOCAL_CALENDAR_KEY, JSON.stringify(calendarEvents));
+    } catch (e) {}
+  }, [calendarEvents]);
+
+  // Save quick presets
+  useEffect(() => {
+    try {
+      localStorage.setItem(LOCAL_QUICK_PRESETS_KEY, JSON.stringify(quickStagePresets));
+    } catch (e) {}
+  }, [quickStagePresets]);
+
   // Service Templates Table State (Postgres `service_templates`)
   const [serviceTemplates, setServiceTemplates] = useState<ServiceTemplate[]>(() => getStoredTemplates());
 
@@ -351,12 +280,8 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
   // Director Real-time Screen Pop-up Announcement State
   const [activeDirectorAnnouncement, setActiveDirectorAnnouncement] = useState<DirectorAnnouncement | null>(null);
 
-  // Presenter notification log (ephemeral history)
-  const [notifications, setNotifications] = useState<{ id: string; to: string; message: string; timestamp: string }[]>([
-    { id: 'notif-1', to: 'Lebo', message: "You're up in 5 minutes", timestamp: '08:55 AM' },
-    { id: 'notif-2', to: 'Lebo', message: '2 minutes to go', timestamp: '08:58 AM' },
-    { id: 'notif-3', to: 'Lebo', message: 'Please move backstage --', timestamp: '09:00 AM' },
-  ]);
+  // Presenter notification log (starts blank)
+  const [notifications, setNotifications] = useState<{ id: string; to: string; message: string; timestamp: string }[]>([]);
 
   // Active role derived from authenticated user or prop
   const activeRole = authUser.role || activeRoleProp;
@@ -520,6 +445,26 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
             playCueSound(announcement.severity === 'emergency' ? 'emergency' : announcement.severity === 'important' ? 'urgent' : 'normal');
             break;
           }
+          case 'COMMS_EMERGENCY': {
+            const alert = data.payload as CommsEmergencyAlert;
+            setCommsEmergencyAlerts((prev) => [alert, ...prev.filter((a) => a.id !== alert.id)]);
+            playCueSound('emergency');
+            break;
+          }
+          case 'CALENDAR_UPDATE': {
+            const events = data.payload as CalendarEvent[];
+            setCalendarEvents(events);
+            break;
+          }
+          case 'QUICK_PRESETS_UPDATE': {
+            const presets = data.payload as QuickStagePreset[];
+            setQuickStagePresets(presets);
+            break;
+          }
+          case 'WEEKLY_RESET': {
+            resetWeeklyServiceState();
+            break;
+          }
         }
       };
 
@@ -624,7 +569,8 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
 
   // Current & next segment lookup
   const currentSegment = useMemo(() => {
-    return segments.find((s) => s.id === serviceState.currentSegmentId) || segments[2];
+    if (segments.length === 0) return null;
+    return segments.find((s) => s.id === serviceState.currentSegmentId) || segments[0] || null;
   }, [segments, serviceState.currentSegmentId]);
 
   const nextSegment = useMemo(() => {
@@ -731,13 +677,13 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
 
       const overridePayload: HolySpiritOverridePayload = {
         action,
-        segmentId: currentSegment.id,
-        segmentTitle: currentSegment.title,
+        segmentId: currentSegment?.id || 'live-service',
+        segmentTitle: currentSegment?.title || 'Live Service',
         adjustmentMinutes,
         newTargetEndTime: newTargetIso,
         reason: reason || 'Holy Spirit Flow Adjustment',
         notifications: {
-          presenter: `${currentSegment.title} ${action === 'extend' ? `extended by +${adjustmentMinutes} mins` : 'adjusted'}. New target countdown updated!`,
+          presenter: `${currentSegment?.title || 'Current moment'} ${action === 'extend' ? `extended by +${adjustmentMinutes} mins` : 'adjusted'}. New target countdown updated!`,
           comms: 'Timeline adjusted. All downstream segments synced.',
           tech: 'Continue current media & lighting cue.',
         },
@@ -1301,18 +1247,220 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
     [dispatchBroadcast, sendStageCue]
   );
 
-  // Prayer & Reviews
-  const addPrayerRequest = useCallback((text: string, category: 'team' | 'kids' | 'service' = 'team') => {
-    const newReq: PrayerRequest = {
-      id: `prayer_${Date.now()}`,
-      author: authUser?.name || 'Team Leader',
-      text,
+  // Tech Checklist Admin Operations
+  const addChecklistItem = useCallback((label: string, category: 'hardware' | 'audio' | 'media' | 'presentation' | 'general' = 'hardware') => {
+    const newItem: PreServiceCheckItem = {
+      id: `chk_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      label,
+      statusText: 'Pending',
+      isChecked: false,
+      category,
+    };
+    setChecklist((prev) => {
+      const next = [...prev, newItem];
+      dispatchBroadcast('CHECKLIST_UPDATE', next);
+      return next;
+    });
+    return newItem;
+  }, [dispatchBroadcast]);
+
+  const editChecklistItem = useCallback((id: string, updates: Partial<PreServiceCheckItem>) => {
+    setChecklist((prev) => {
+      const next = prev.map((item) => (item.id === id ? { ...item, ...updates } : item));
+      dispatchBroadcast('CHECKLIST_UPDATE', next);
+      return next;
+    });
+  }, [dispatchBroadcast]);
+
+  const deleteChecklistItem = useCallback((id: string) => {
+    setChecklist((prev) => {
+      const next = prev.filter((item) => item.id !== id);
+      dispatchBroadcast('CHECKLIST_UPDATE', next);
+      return next;
+    });
+  }, [dispatchBroadcast]);
+
+  // Timeline Segments Admin Operations
+  const addSegment = useCallback((segmentData: {
+    title: string;
+    plannedStartTime?: string;
+    durationMinutes: number;
+    assignedLead?: string;
+    assignedRole?: string;
+    notes?: string;
+    keyScripture?: string;
+  }) => {
+    setSegments((prev) => {
+      const newOrder = prev.length + 1;
+      const newSeg: ServiceSegment = {
+        id: `seg_${Date.now()}_${newOrder}`,
+        order: newOrder,
+        title: segmentData.title,
+        plannedStartTime: segmentData.plannedStartTime || '09:00 AM',
+        durationMinutes: segmentData.durationMinutes || 15,
+        assignedLead: segmentData.assignedLead || 'Leader',
+        assignedRole: segmentData.assignedRole || 'Speaker',
+        status: prev.length === 0 ? 'in_progress' : 'upcoming',
+        notes: segmentData.notes || '',
+        keyScripture: segmentData.keyScripture || undefined,
+      };
+      const next = [...prev, newSeg];
+      if (prev.length === 0) {
+        const durationSec = newSeg.durationMinutes * 60;
+        const targetEnd = new Date(Date.now() + durationSec * 1000).toISOString();
+        const updatedState: ServiceState = {
+          ...serviceState,
+          currentSegmentId: newSeg.id,
+          targetEndTime: targetEnd,
+          targetDurationSeconds: durationSec,
+          isPaused: false,
+          lastUpdated: new Date().toISOString(),
+        };
+        setServiceState(updatedState);
+        dispatchBroadcast('SERVICE_STATE_UPDATE', updatedState);
+      }
+      return next;
+    });
+  }, [serviceState, dispatchBroadcast]);
+
+  const editSegment = useCallback((id: string, updates: Partial<ServiceSegment>) => {
+    setSegments((prev) => {
+      const next = prev.map((s) => (s.id === id ? { ...s, ...updates } : s));
+      return next;
+    });
+  }, []);
+
+  const deleteSegment = useCallback((id: string) => {
+    setSegments((prev) => {
+      const filtered = prev.filter((s) => s.id !== id);
+      const reindexed = filtered.map((s, idx) => ({ ...s, order: idx + 1 }));
+      if (serviceState.currentSegmentId === id) {
+        const nextSeg = reindexed[0] || null;
+        setServiceState((st) => ({
+          ...st,
+          currentSegmentId: nextSeg?.id || null,
+          targetEndTime: nextSeg ? new Date(Date.now() + nextSeg.durationMinutes * 60 * 1000).toISOString() : null,
+          targetDurationSeconds: nextSeg ? nextSeg.durationMinutes * 60 : 0,
+        }));
+      }
+      return reindexed;
+    });
+  }, [serviceState.currentSegmentId]);
+
+  // Calendar Admin Operations
+  const addCalendarEvent = useCallback((eventData: Omit<CalendarEvent, 'id'>) => {
+    const newEvent: CalendarEvent = {
+      ...eventData,
+      id: `calevt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    };
+    setCalendarEvents((prev) => {
+      const next = [...prev, newEvent];
+      dispatchBroadcast('CALENDAR_UPDATE', next);
+      return next;
+    });
+    return newEvent;
+  }, [dispatchBroadcast]);
+
+  const updateCalendarEvent = useCallback((id: string, updates: Partial<CalendarEvent>) => {
+    setCalendarEvents((prev) => {
+      const next = prev.map((evt) => (evt.id === id ? { ...evt, ...updates } : evt));
+      dispatchBroadcast('CALENDAR_UPDATE', next);
+      return next;
+    });
+  }, [dispatchBroadcast]);
+
+  const deleteCalendarEvent = useCallback((id: string) => {
+    setCalendarEvents((prev) => {
+      const next = prev.filter((evt) => evt.id !== id);
+      dispatchBroadcast('CALENDAR_UPDATE', next);
+      return next;
+    });
+  }, [dispatchBroadcast]);
+
+  // Quick Stage Presets Admin Operations
+  const addQuickStagePreset = useCallback((presetData: Omit<QuickStagePreset, 'id'>) => {
+    const newPreset: QuickStagePreset = {
+      ...presetData,
+      id: `qp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    };
+    setQuickStagePresets((prev) => {
+      const next = [...prev, newPreset];
+      dispatchBroadcast('QUICK_PRESETS_UPDATE', next);
+      return next;
+    });
+    return newPreset;
+  }, [dispatchBroadcast]);
+
+  const updateQuickStagePreset = useCallback((id: string, updates: Partial<QuickStagePreset>) => {
+    setQuickStagePresets((prev) => {
+      const next = prev.map((p) => (p.id === id ? { ...p, ...updates } : p));
+      dispatchBroadcast('QUICK_PRESETS_UPDATE', next);
+      return next;
+    });
+  }, [dispatchBroadcast]);
+
+  const deleteQuickStagePreset = useCallback((id: string) => {
+    setQuickStagePresets((prev) => {
+      const next = prev.filter((p) => p.id !== id);
+      dispatchBroadcast('QUICK_PRESETS_UPDATE', next);
+      return next;
+    });
+  }, [dispatchBroadcast]);
+
+  // Comms Emergency Dispatch (Comms is the primary communicator)
+  const sendCommsEmergency = useCallback((target: 'tech' | 'presenter' | 'all', message: string) => {
+    const alert: CommsEmergencyAlert = {
+      id: `emerg_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      target,
+      message,
+      senderName: authUser?.name ? `${authUser.name} (Comms)` : 'Comms Desk',
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      acknowledged: false,
+    };
+    setCommsEmergencyAlerts((prev) => [alert, ...prev]);
+    playCueSound('emergency');
+    dispatchBroadcast('COMMS_EMERGENCY', alert);
+
+    const newIncident: IncidentLog = {
+      id: `inc_${Date.now()}`,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      description: `[COMMS URGENT -> ${target.toUpperCase()}]: ${message}`,
+      status: 'open',
+      severity: 'critical',
+      reportedBy: authUser?.name ? `${authUser.name} (Comms)` : 'Comms Desk',
+    };
+    setIncidents((prev) => [newIncident, ...prev]);
+    dispatchBroadcast('INCIDENT_ADDED', newIncident);
+    return alert;
+  }, [authUser?.name, dispatchBroadcast, playCueSound]);
+
+  const acknowledgeCommsEmergency = useCallback((id: string) => {
+    setCommsEmergencyAlerts((prev) => prev.filter((a) => a.id !== id));
+  }, []);
+
+  // Saved Prayer Requests Operations (Saved permanently)
+  const addPrayerRequest = useCallback((text: string, category: 'team' | 'kids' | 'service' | 'general' = 'team', customAuthor?: string) => {
+    const newReq: PrayerRequest = {
+      id: `prayer_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      author: customAuthor || authUser?.name || 'Leader',
+      text,
+      timestamp: new Date().toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       isAnswered: false,
       category,
     };
     setPrayerRequests((prev) => [newReq, ...prev]);
+    return newReq;
   }, [authUser?.name]);
+
+  const togglePrayerAnswered = useCallback((id: string) => {
+    setPrayerRequests((prev) =>
+      prev.map((req) => (req.id === id ? { ...req, isAnswered: !req.isAnswered } : req))
+    );
+  }, []);
+
+  const deletePrayerRequest = useCallback((id: string) => {
+    setPrayerRequests((prev) => prev.filter((req) => req.id !== id));
+  }, []);
 
   const updateReview = useCallback((review: Partial<ServiceReviewData>) => {
     setReviewData((prev) => ({
@@ -1324,6 +1472,64 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
       },
     }));
   }, []);
+
+  const resetReview = useCallback(() => {
+    setReviewData({
+      ratings: { equipment: 0, timing: 0, communication: 0, kidsEngagement: 0, holySpiritFlow: 0, overall: 0 },
+      whatWentWell: '',
+      notes: '',
+    });
+  }, []);
+
+  // Weekly Monday Reset (Every Monday state resets to clean slate)
+  const resetWeeklyServiceState = useCallback(() => {
+    setServiceState({
+      serviceId: 'srv-' + Date.now(),
+      serviceName: 'Sunday Service',
+      date: new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }),
+      theme: '',
+      currentSegmentId: null,
+      targetEndTime: null,
+      targetDurationSeconds: 0,
+      isPaused: false,
+      lastUpdated: new Date().toISOString(),
+      currentSlideIndex: 1,
+      totalSlides: 1,
+      activeWorshipSongId: null,
+      isEmergencyActive: false,
+      activeEmergencyType: null,
+    });
+    setSegments((prev) => prev.map((s) => ({ ...s, status: 'upcoming' })));
+    setChecklist((prev) => prev.map((item) => ({ ...item, isChecked: false })));
+    setReviewData({
+      ratings: { equipment: 0, timing: 0, communication: 0, kidsEngagement: 0, holySpiritFlow: 0, overall: 0 },
+      whatWentWell: '',
+      notes: '',
+    });
+    setActiveCues([]);
+    setCommsEmergencyAlerts([]);
+    setIncidents([]);
+    setNotifications([]);
+
+    try {
+      localStorage.setItem(LOCAL_MONDAY_RESET_KEY, getMostRecentMonday());
+    } catch (e) {}
+
+    dispatchBroadcast('WEEKLY_RESET', null);
+  }, [dispatchBroadcast]);
+
+  // Check if today is Monday or past an un-reset Monday
+  useEffect(() => {
+    try {
+      const currentMonday = getMostRecentMonday();
+      const lastReset = localStorage.getItem(LOCAL_MONDAY_RESET_KEY);
+      if (lastReset !== currentMonday) {
+        resetWeeklyServiceState();
+      }
+    } catch (e) {
+      console.warn('Weekly reset check error:', e);
+    }
+  }, [resetWeeklyServiceState]);
 
   return {
     authUser,
@@ -1360,6 +1566,23 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
     setSlideIndex,
     toggleChecklistItem,
     markAllChecksDone,
+    addChecklistItem,
+    editChecklistItem,
+    deleteChecklistItem,
+    addSegment,
+    editSegment,
+    deleteSegment,
+    calendarEvents,
+    addCalendarEvent,
+    updateCalendarEvent,
+    deleteCalendarEvent,
+    quickStagePresets,
+    addQuickStagePreset,
+    updateQuickStagePreset,
+    deleteQuickStagePreset,
+    commsEmergencyAlerts,
+    sendCommsEmergency,
+    acknowledgeCommsEmergency,
     setWorshipSong,
     startSegment,
     completeSegment,
@@ -1367,7 +1590,11 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
     resolveIncident,
     sendNotification,
     addPrayerRequest,
+    togglePrayerAnswered,
+    deletePrayerRequest,
     updateReview,
+    resetReview,
+    resetWeeklyServiceState,
     setLessonNotes,
     selectedClassId,
     switchClassHub,

@@ -65,7 +65,7 @@ export interface PreServiceCheckItem {
   label: string;
   statusText: string;
   isChecked: boolean;
-  category?: 'hardware' | 'media' | 'audio' | 'general';
+  category?: 'hardware' | 'media' | 'audio' | 'general' | 'presentation';
 }
 
 export interface WorshipSong {
@@ -272,12 +272,48 @@ export interface BroadcastChannelEvent<T = unknown> {
     | 'INCIDENT_ADDED'
     | 'SERVICE_TEMPLATES_UPDATE'
     | 'AUTH_USER_CHANGE'
-    | 'DIRECTOR_ANNOUNCEMENT';
+    | 'DIRECTOR_ANNOUNCEMENT'
+    | 'COMMS_EMERGENCY'
+    | 'CALENDAR_UPDATE'
+    | 'QUICK_PRESETS_UPDATE'
+    | 'WEEKLY_RESET';
   payload: T;
   sentAt: string;
   senderId: string;
 }
 
+export interface CalendarEvent {
+  id: string;
+  title: string;
+  date: string; // "YYYY-MM-DD"
+  startTime: string; // e.g. "08:30 AM"
+  endTime?: string; // e.g. "10:30 AM"
+  classId: ClassId;
+  type: 'service' | 'rehearsal' | 'meeting' | 'special_event';
+  theme?: string;
+  leadLeader?: string;
+  notes?: string;
+  createdBy?: string;
+}
+
+export interface QuickStagePreset {
+  id: string;
+  label: string;
+  message: string;
+  priority: 'normal' | 'urgent';
+  color?: string;
+}
+
+export interface CommsEmergencyAlert {
+  id: string;
+  target: 'tech' | 'presenter' | 'all';
+  message: string;
+  senderName: string;
+  timestamp: string;
+  acknowledged?: boolean;
+}
+
 // Convenient aliases
 export type ChecklistItem = PreServiceCheckItem;
 export type IncidentItem = IncidentLog;
+

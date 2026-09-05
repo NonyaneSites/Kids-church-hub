@@ -81,6 +81,19 @@ export default function App() {
     setSlideIndex,
     toggleChecklistItem,
     markAllChecksDone,
+    addChecklistItem,
+    deleteChecklistItem,
+    addSegment,
+    deleteSegment,
+    calendarEvents,
+    addCalendarEvent,
+    deleteCalendarEvent,
+    quickStagePresets,
+    addQuickStagePreset,
+    deleteQuickStagePreset,
+    commsEmergencyAlerts,
+    sendCommsEmergency,
+    acknowledgeCommsEmergency,
     setWorshipSong,
     startSegment,
     completeSegment,
@@ -88,7 +101,11 @@ export default function App() {
     resolveIncident,
     sendNotification,
     addPrayerRequest,
+    togglePrayerAnswered,
+    deletePrayerRequest,
     updateReview,
+    resetReview,
+    resetWeeklyServiceState,
     selectedClassId,
     switchClassHub,
     activeClassInfo,
@@ -110,6 +127,7 @@ export default function App() {
   } = useServiceSync(activeRole);
 
   const isDirector = authUser?.role === 'director' || (authUser?.role === 'admin' && authUser?.assignedClassId === 'all');
+  const isClassAdmin = Boolean(authUser?.isClassAdmin) || (authUser?.role === 'admin') || (authUser?.role as string) === 'class-admin' || isDirector;
   const isTechOnly = authUser?.role === 'tech';
   const isPresenterOnly = authUser?.role === 'presenter';
   const isCommsOnly = authUser?.role === 'comms';
@@ -335,12 +353,19 @@ export default function App() {
             nextSegment={nextSegment}
             localTimer={localTimer}
             sendStageCue={sendStageCue}
+            sendCommsEmergency={sendCommsEmergency}
+            quickPresets={quickStagePresets}
+            addQuickPreset={addQuickStagePreset}
+            deleteQuickPreset={deleteQuickStagePreset}
+            addSegment={addSegment}
+            deleteSegment={deleteSegment}
             sendNotification={sendNotification}
             notifications={notifications}
             startSegment={startSegment}
             completeSegment={completeSegment}
             onOpenHolySpiritModal={() => setIsHolySpiritModalOpen(true)}
             onSwitchToPresenter={() => setActiveTab('presenter')}
+            isClassAdmin={isClassAdmin}
           />
         )}
 
@@ -350,6 +375,8 @@ export default function App() {
             checklist={checklist}
             toggleChecklistItem={toggleChecklistItem}
             markAllChecksDone={markAllChecksDone}
+            addChecklistItem={addChecklistItem}
+            deleteChecklistItem={deleteChecklistItem}
             worshipQueue={worshipQueue}
             setWorshipSong={setWorshipSong}
             currentSlideIndex={serviceState.currentSlideIndex}
@@ -360,11 +387,13 @@ export default function App() {
             isEmergencyActive={serviceState.isEmergencyActive}
             activeEmergencyType={serviceState.activeEmergencyType}
             lessonNotes={lessonNotes}
-            onOpenHolySpiritModal={() => setIsHolySpiritModalOpen(true)}
-            onSendStageCue={sendStageCue}
+            activeCues={activeCues}
+            commsEmergencyAlerts={commsEmergencyAlerts}
+            onAcknowledgeEmergency={acknowledgeCommsEmergency}
             incidents={incidents}
             onAddIncident={addIncident}
             onResolveIncident={resolveIncident}
+            isClassAdmin={isClassAdmin}
           />
         )}
 
@@ -406,8 +435,16 @@ export default function App() {
           <PlannerReview
             reviewData={reviewData}
             updateReview={updateReview}
+            resetReview={resetReview}
             prayerRequests={prayerRequests}
             addPrayerRequest={addPrayerRequest}
+            togglePrayerAnswered={togglePrayerAnswered}
+            deletePrayerRequest={deletePrayerRequest}
+            calendarEvents={calendarEvents}
+            addCalendarEvent={addCalendarEvent}
+            deleteCalendarEvent={deleteCalendarEvent}
+            isClassAdmin={isClassAdmin}
+            activeClassId={selectedClassId}
           />
         )}
 
