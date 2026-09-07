@@ -11,6 +11,11 @@ import {
   fetchAccountsFromSupabase,
   syncAllAccountsToSupabase,
 } from './supabase';
+import {
+  saveAccountToFirestore,
+  deleteAccountFromFirestore,
+  fetchAccountsFromFirestore,
+} from './firebase';
 
 const DB_NAME = 'CRCKidsChurchDB';
 const DB_VERSION = 1;
@@ -50,6 +55,21 @@ function savePermanentlyDeletedKey(id: string, email?: string): void {
     localStorage.setItem(LOCAL_STORAGE_DELETED_KEY, JSON.stringify(current));
   } catch (e) {
     console.warn('Error recording deleted key:', e);
+  }
+}
+
+/**
+ * Remove an ID or email from the permanent deletion registry.
+ * This guarantees newly created accounts with previously used IDs/emails will never disappear!
+ */
+export function removePermanentlyDeletedKey(id: string, email?: string): void {
+  try {
+    const current = getPermanentlyDeletedKeys();
+    const newIds = current.ids.filter((i) => i !== id);
+    const newEmails = email ? current.emails.filter((e) => e.toLowerCase() !== email.toLowerCase()) : current.emails;
+    localStorage.setItem(LOCAL_STORAGE_DELETED_KEY, JSON.stringify({ ids: newIds, emails: newEmails }));
+  } catch (e) {
+    console.warn('Error unmarking deleted key:', e);
   }
 }
 
@@ -160,16 +180,24 @@ export function dbGetAccounts(): AuthUser[] {
 
 /**
  * Insert or update an account in the database.
- * Persists to IndexedDB/localStorage AND syncs immediately to Supabase if configured.
+ * Persists to IndexedDB/localStorage AND syncs immediately to Firestore & Supabase.
  */
 export function dbSaveAccount(user: AuthUser): AuthUser[] {
   try {
+    // CRITICAL: Un-mark from permanently deleted keys so this account will NEVER disappear!
+    removePermanentlyDeletedKey(user.id, user.email);
+
     const list = dbGetAccounts();
     const filtered = list.filter((u) => u.id !== user.id && u.email.toLowerCase() !== user.email.toLowerCase());
     const updated = [user, ...filtered];
 
     localStorage.setItem(LOCAL_STORAGE_ACCOUNTS_KEY, JSON.stringify(updated));
     syncToIndexedDB(updated);
+
+    // Sync to Firestore cloud database
+    saveAccountToFirestore(user).catch((e) => {
+      console.warn('Firestore sync failed:', e);
+    });
 
     // Sync to Supabase cloud database
     saveAccountToSupabase(user).then((success) => {
@@ -187,7 +215,7 @@ export function dbSaveAccount(user: AuthUser): AuthUser[] {
 
 /**
  * Permanently delete an account from the database.
- * Adds ID and email to the permanent deletion registry and deletes from Supabase.
+ * Adds ID and email to the permanent deletion registry and deletes from Firestore & Supabase.
  */
 export function dbDeleteAccount(userId: string): AuthUser[] {
   try {
@@ -204,6 +232,11 @@ export function dbDeleteAccount(userId: string): AuthUser[] {
     localStorage.setItem(LOCAL_STORAGE_ACCOUNTS_KEY, JSON.stringify(updated));
     syncToIndexedDB(updated);
 
+    // Remove from Firestore cloud database
+    deleteAccountFromFirestore(userId).catch((e) => {
+      console.warn('Firestore delete failed:', e);
+    });
+
     // Remove from Supabase cloud database
     deleteAccountFromSupabase(userId).then((success) => {
       if (success) {
@@ -214,6 +247,39 @@ export function dbDeleteAccount(userId: string): AuthUser[] {
     return updated;
   } catch (e) {
     console.error('Failed to delete account from database:', e);
+    return dbGetAccounts();
+  }
+}
+
+/**
+ * Merge remote accounts fetched from Firestore into the local database
+ */
+export function dbSyncFirestoreAccounts(remoteAccounts: AuthUser[]): AuthUser[] {
+  try {
+    if (!remoteAccounts || remoteAccounts.length === 0) return dbGetAccounts();
+    const deleted = getPermanentlyDeletedKeys();
+    const local = dbGetAccounts();
+
+    const mergedMap = new Map<string, AuthUser>();
+
+    // Add local accounts
+    for (const acc of local) {
+      mergedMap.set(acc.id, acc);
+    }
+
+    // Merge or add remote accounts (unless explicitly marked as deleted)
+    for (const rem of remoteAccounts) {
+      if (!deleted.ids.includes(rem.id) && !deleted.emails.includes((rem.email || '').toLowerCase())) {
+        mergedMap.set(rem.id, rem);
+      }
+    }
+
+    const merged = Array.from(mergedMap.values());
+    localStorage.setItem(LOCAL_STORAGE_ACCOUNTS_KEY, JSON.stringify(merged));
+    syncToIndexedDB(merged);
+    return merged;
+  } catch (e) {
+    console.warn('Error syncing Firestore accounts to local:', e);
     return dbGetAccounts();
   }
 }
@@ -284,14 +350,38 @@ export async function dbSyncWithSupabase(): Promise<{
     const localAccounts = dbGetAccounts();
 
     if (remoteAccounts && remoteAccounts.length > 0) {
-      // Remote Supabase has accounts -> store locally as authoritative
       const deleted = getPermanentlyDeletedKeys();
-      const sanitized = remoteAccounts.filter(
-        (a) => !deleted.ids.includes(a.id) && !deleted.emails.includes((a.email || '').toLowerCase())
-      );
-      localStorage.setItem(LOCAL_STORAGE_ACCOUNTS_KEY, JSON.stringify(sanitized));
-      syncToIndexedDB(sanitized);
-      return { synced: true, accounts: sanitized, source: 'supabase' };
+      const mergedMap = new Map<string, AuthUser>();
+
+      // 1. Add local accounts first
+      for (const acc of localAccounts) {
+        if (!deleted.ids.includes(acc.id) && !deleted.emails.includes((acc.email || '').toLowerCase())) {
+          mergedMap.set(acc.id, acc);
+        }
+      }
+
+      // 2. Merge remote accounts
+      for (const rem of remoteAccounts) {
+        if (!deleted.ids.includes(rem.id) && !deleted.emails.includes((rem.email || '').toLowerCase())) {
+          mergedMap.set(rem.id, rem);
+        }
+      }
+
+      const merged = Array.from(mergedMap.values());
+      localStorage.setItem(LOCAL_STORAGE_ACCOUNTS_KEY, JSON.stringify(merged));
+      syncToIndexedDB(merged);
+
+      // Push any locally registered accounts that aren't yet in remote Supabase
+      for (const loc of localAccounts) {
+        const inRemote = remoteAccounts.some(
+          (r) => r.id === loc.id || (r.email && r.email.toLowerCase() === (loc.email || '').toLowerCase())
+        );
+        if (!inRemote) {
+          saveAccountToSupabase(loc).catch(() => {});
+        }
+      }
+
+      return { synced: true, accounts: merged, source: 'supabase' };
     } else if (remoteAccounts && remoteAccounts.length === 0 && localAccounts.length > 0) {
       // Supabase table is empty, push existing local accounts to Supabase
       await syncAllAccountsToSupabase(localAccounts);

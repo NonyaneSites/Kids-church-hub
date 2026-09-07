@@ -11,7 +11,8 @@ import {
   Sparkles,
   Flame,
   CheckCircle2,
-  AlertTriangle
+  AlertTriangle,
+  Radio
 } from 'lucide-react';
 import {
   ServiceSegment,
@@ -32,6 +33,8 @@ interface PresenterModeProps {
   };
   activeCues: StageCueBroadcast[];
   dismissCue: (id: string) => void;
+  onCopyCue?: (cueId: string) => void;
+  currentUserId?: string;
   lessonNotes: LessonNotesData;
   onOpenHolySpiritModal: () => void;
 }
@@ -42,6 +45,8 @@ export const PresenterMode: React.FC<PresenterModeProps> = ({
   localTimer,
   activeCues,
   dismissCue,
+  onCopyCue,
+  currentUserId,
   lessonNotes,
   onOpenHolySpiritModal,
 }) => {
@@ -83,50 +88,89 @@ export const PresenterMode: React.FC<PresenterModeProps> = ({
 
       {/* Floating Active Stage Cues / Toasts Bar */}
       <div className="w-full max-w-xl z-20 space-y-2 mb-4">
-        {activeCues.map((cue) => (
-          <div
-            key={cue.id}
-            className={`p-3.5 sm:p-4 rounded-2xl border flex items-center justify-between shadow-2xl animate-bounce ${
-              cue.priority === 'urgent'
-                ? 'bg-amber-950/90 border-amber-400/60 text-amber-100 shadow-[0_0_20px_rgba(245,158,11,0.3)]'
-                : cue.priority === 'emergency'
-                ? 'bg-red-950/90 border-red-500 text-white shadow-[0_0_20px_rgba(239,68,68,0.4)]'
-                : 'bg-purple-950/90 border-purple-400/60 text-purple-100 shadow-[0_0_20px_rgba(147,51,234,0.3)]'
-            }`}
-          >
-            <div className="flex items-center gap-3">
-              <span className="text-xl">
-                {cue.type === 'mic_closer'
-                  ? '🎙️'
-                  : cue.type === 'wrap_up'
-                  ? '⏱️'
-                  : cue.type === 'speed_up'
-                  ? '⚡'
-                  : cue.type === 'slow_down'
-                  ? '🐢'
-                  : cue.type === 'pray'
-                  ? '🙏'
-                  : '📢'}
-              </span>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] uppercase font-bold tracking-widest bg-black/40 px-2 py-0.5 rounded border border-white/10">
-                    STAGE CUE: {cue.title}
+        {activeCues.map((cue) => {
+          const hasCopied = cue.copies?.some((c) => c.userId === currentUserId);
+
+          return (
+            <div
+              key={cue.id}
+              className={`p-4 rounded-2xl border flex flex-col gap-3 shadow-2xl transition-all ${
+                cue.priority === 'urgent'
+                  ? 'bg-amber-950/95 border-amber-400/60 text-amber-100 shadow-[0_0_25px_rgba(245,158,11,0.35)]'
+                  : cue.priority === 'emergency'
+                  ? 'bg-red-950/95 border-red-500 text-white shadow-[0_0_25px_rgba(239,68,68,0.45)]'
+                  : 'bg-purple-950/95 border-purple-400/60 text-purple-100 shadow-[0_0_25px_rgba(147,51,234,0.35)]'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">
+                    {cue.type === 'mic_closer'
+                      ? '🎙️'
+                      : cue.type === 'wrap_up'
+                      ? '⏱️'
+                      : cue.type === 'speed_up'
+                      ? '⚡'
+                      : cue.type === 'slow_down'
+                      ? '🐢'
+                      : cue.type === 'pray'
+                      ? '🙏'
+                      : '📢'}
                   </span>
-                  <span className="text-[10px] text-gray-300 font-mono">{cue.timestamp}</span>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] uppercase font-black tracking-widest bg-black/40 px-2 py-0.5 rounded border border-white/10">
+                        DIRECTIVE: {cue.title}
+                      </span>
+                      <span className="text-[10px] text-gray-300 font-mono">{cue.timestamp}</span>
+                      <span className="text-[10px] text-purple-300">from {cue.senderName}</span>
+                    </div>
+                    <p className="text-sm font-bold mt-1 leading-snug">{cue.message}</p>
+                  </div>
                 </div>
-                <p className="text-sm font-bold mt-0.5">{cue.message}</p>
+
+                <button
+                  onClick={() => dismissCue(cue.id)}
+                  className="p-1.5 rounded-lg bg-black/40 hover:bg-black/60 text-gray-300 hover:text-white transition-colors self-start"
+                  title="Dismiss cue"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* COPY / ROGER THAT ACTION BAR */}
+              <div className="pt-2 border-t border-white/10 flex flex-wrap items-center justify-between gap-2 text-xs">
+                {hasCopied ? (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-emerald-500/20 border border-emerald-500/50 text-emerald-300 font-bold shadow-[0_0_12px_rgba(16,185,129,0.2)]">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                    <span>✓ You Copied This (Roger That)</span>
+                  </span>
+                ) : (
+                  <button
+                    id={`btn-copy-presenter-${cue.id}`}
+                    onClick={() => onCopyCue && onCopyCue(cue.id)}
+                    className="px-4 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs uppercase tracking-wider flex items-center gap-1.5 shadow-[0_0_15px_rgba(16,185,129,0.4)] transition-all active:scale-95 animate-pulse"
+                  >
+                    <Radio className="w-4 h-4" />
+                    <span>Say "Copy"</span>
+                  </button>
+                )}
+
+                <div className="text-[11px] text-gray-300">
+                  {cue.copies && cue.copies.length > 0 ? (
+                    <span className="text-emerald-300 font-medium">
+                      ✓ Copied by: {cue.copies.map((c) => `${c.userName} (${c.userRole})`).join(', ')}
+                    </span>
+                  ) : (
+                    <span className="text-amber-300/80 italic text-[11px]">
+                      Awaiting acknowledgment
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
-
-            <button
-              onClick={() => dismissCue(cue.id)}
-              className="p-1.5 rounded-lg bg-black/40 hover:bg-black/60 text-gray-300 hover:text-white transition-colors"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Stage Header */}

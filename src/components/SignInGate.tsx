@@ -29,11 +29,13 @@ import { CLASSES_CONFIG } from '../data/classHubsData';
 interface SignInGateProps {
   onSignIn: (user: AuthUser) => void;
   registeredAccounts: AuthUser[];
+  onAddNewAccount?: (newUser: AuthUser) => void;
 }
 
 export const SignInGate: React.FC<SignInGateProps> = ({
   onSignIn,
   registeredAccounts = [],
+  onAddNewAccount,
 }) => {
   const [selectedAccount, setSelectedAccount] = useState<AuthUser | null>(null);
   const [authMethod, setAuthMethod] = useState<'pin' | 'otp'>('pin');
@@ -47,9 +49,17 @@ export const SignInGate: React.FC<SignInGateProps> = ({
   const [enteredOtp, setEnteredOtp] = useState('');
   const [isOtpSent, setIsOtpSent] = useState(false);
 
-  // Email Lookup Form State
-  const [activeMode, setActiveMode] = useState<'accounts' | 'email'>('accounts');
+  // Mode Selection
+  const [activeMode, setActiveMode] = useState<'accounts' | 'email' | 'register'>('accounts');
   const [emailInput, setEmailInput] = useState('');
+
+  // Register New Account State
+  const [regName, setRegName] = useState('');
+  const [regEmail, setRegEmail] = useState('');
+  const [regRole, setRegRole] = useState<Role>('director');
+  const [regClassId, setRegClassId] = useState<ClassId | 'all'>('all');
+  const [regPhone, setRegPhone] = useState('');
+  const [regPin, setRegPin] = useState('2026');
   
   // Feedback Messages
   const [errorMessage, setErrorMessage] = useState('');
@@ -457,6 +467,7 @@ export const SignInGate: React.FC<SignInGateProps> = ({
             </div>
 
             {/* Tab: Select Profile vs Email Search */}
+            {/* MODE SELECTOR */}
             <div className="flex items-center gap-2 p-1 bg-black/40 rounded-xl border border-white/5 text-xs font-bold">
               <button
                 onClick={() => setActiveMode('accounts')}
@@ -465,7 +476,7 @@ export const SignInGate: React.FC<SignInGateProps> = ({
                 }`}
               >
                 <UserCheck className="w-3.5 h-3.5" />
-                <span>Staff & Volunteer Profiles ({registeredAccounts.length})</span>
+                <span>Roster ({registeredAccounts.length})</span>
               </button>
               <button
                 onClick={() => setActiveMode('email')}
@@ -475,6 +486,15 @@ export const SignInGate: React.FC<SignInGateProps> = ({
               >
                 <LogIn className="w-3.5 h-3.5" />
                 <span>Email Lookup</span>
+              </button>
+              <button
+                onClick={() => setActiveMode('register')}
+                className={`flex-1 py-2 rounded-lg transition-all text-center flex items-center justify-center gap-1.5 ${
+                  activeMode === 'register' ? 'bg-amber-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                <Crown className="w-3.5 h-3.5 text-amber-300" />
+                <span>Register Account</span>
               </button>
             </div>
 
@@ -666,6 +686,224 @@ export const SignInGate: React.FC<SignInGateProps> = ({
                 >
                   <LogIn className="w-4 h-4" />
                   <span>Find Account & Proceed to PIN Verification</span>
+                </button>
+              </form>
+            )}
+
+            {/* TAB: REGISTER ACCOUNT */}
+            {activeMode === 'register' && (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  setErrorMessage('');
+                  if (!regName.trim()) {
+                    setErrorMessage('Full name is required.');
+                    return;
+                  }
+                  if (!regEmail.trim()) {
+                    setErrorMessage('Email address is required.');
+                    return;
+                  }
+
+                  const effectiveRole: Role = regRole;
+                  const effectiveClassId: ClassId | 'all' = effectiveRole === 'director' ? 'all' : regClassId;
+                  const fallbackTitle = effectiveRole === 'director'
+                    ? 'Ministry Director'
+                    : effectiveRole === 'admin'
+                    ? 'Class Admin'
+                    : effectiveRole === 'tech'
+                    ? 'Technical Lead'
+                    : effectiveRole === 'presenter'
+                    ? 'Lead Presenter'
+                    : 'Comms Timekeeper';
+
+                  const newAccount: AuthUser = {
+                    id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+                    name: regName.trim(),
+                    email: regEmail.trim().toLowerCase(),
+                    role: effectiveRole,
+                    assignedClassId: effectiveClassId,
+                    roleTitle: fallbackTitle,
+                    phone: regPhone.trim() || '+27 82 123 4567',
+                    avatarColor: effectiveRole === 'director' ? 'from-amber-500 to-orange-600' : effectiveRole === 'admin' ? 'from-purple-500 to-indigo-600' : effectiveRole === 'tech' ? 'from-blue-500 to-cyan-600' : effectiveRole === 'presenter' ? 'from-pink-500 to-rose-600' : 'from-emerald-500 to-teal-600',
+                    isClassAdmin: effectiveRole === 'admin' || effectiveRole === 'director',
+                    pin: regPin.trim() || '2026',
+                    isAuthenticated: true,
+                  };
+
+                  if (onAddNewAccount) {
+                    onAddNewAccount(newAccount);
+                  }
+                  setSuccessMessage(`Account created for ${newAccount.name}! Entering as ${newAccount.roleTitle}...`);
+                  setTimeout(() => {
+                    onSignIn(newAccount);
+                  }, 600);
+                }}
+                className="space-y-4"
+              >
+                <div>
+                  <label className="text-[11px] font-bold text-gray-300 block mb-1 uppercase tracking-wider">
+                    Full Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={regName}
+                    onChange={(e) => setRegName(e.target.value)}
+                    placeholder="e.g. Pastor Hope or Thabo Ndlovu"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-black/40 border border-white/10 text-white placeholder-gray-500 text-xs focus:outline-none focus:border-amber-500 transition-colors"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-bold text-gray-300 block mb-1 uppercase tracking-wider">
+                    Church Email Address *
+                  </label>
+                  <input
+                    type="email"
+                    value={regEmail}
+                    onChange={(e) => setRegEmail(e.target.value)}
+                    placeholder="e.g. hope@crc.church"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-black/40 border border-white/10 text-white placeholder-gray-500 text-xs focus:outline-none focus:border-amber-500 transition-colors"
+                    required
+                  />
+                </div>
+
+                {/* Role selection */}
+                <div>
+                  <label className="text-[11px] font-bold text-gray-300 block mb-1.5 uppercase tracking-wider">
+                    Select Your Role / Station *
+                  </label>
+                  <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRegRole('director');
+                        setRegClassId('all');
+                      }}
+                      className={`p-2 rounded-xl border text-center transition-all ${
+                        regRole === 'director'
+                          ? 'bg-amber-500/20 border-amber-500 text-amber-300 ring-1 ring-amber-500/50'
+                          : 'bg-black/30 border-white/10 text-gray-400 hover:text-white'
+                      }`}
+                    >
+                      <Crown className="w-4 h-4 mx-auto mb-1 text-amber-400" />
+                      <div className="text-[11px] font-bold">Director</div>
+                      <div className="text-[9px] opacity-75">All Oversight</div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setRegRole('admin')}
+                      className={`p-2 rounded-xl border text-center transition-all ${
+                        regRole === 'admin'
+                          ? 'bg-purple-500/20 border-purple-500 text-purple-300 ring-1 ring-purple-500/50'
+                          : 'bg-black/30 border-white/10 text-gray-400 hover:text-white'
+                      }`}
+                    >
+                      <ShieldCheck className="w-4 h-4 mx-auto mb-1 text-purple-400" />
+                      <div className="text-[11px] font-bold">Class Admin</div>
+                      <div className="text-[9px] opacity-75">Room Lead</div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setRegRole('tech')}
+                      className={`p-2 rounded-xl border text-center transition-all ${
+                        regRole === 'tech'
+                          ? 'bg-blue-500/20 border-blue-500 text-blue-300 ring-1 ring-blue-500/50'
+                          : 'bg-black/30 border-white/10 text-gray-400 hover:text-white'
+                      }`}
+                    >
+                      <Tv className="w-4 h-4 mx-auto mb-1 text-blue-400" />
+                      <div className="text-[11px] font-bold">Tech</div>
+                      <div className="text-[9px] opacity-75">Audio & Visual</div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setRegRole('presenter')}
+                      className={`p-2 rounded-xl border text-center transition-all ${
+                        regRole === 'presenter'
+                          ? 'bg-pink-500/20 border-pink-500 text-pink-300 ring-1 ring-pink-500/50'
+                          : 'bg-black/30 border-white/10 text-gray-400 hover:text-white'
+                      }`}
+                    >
+                      <Clock className="w-4 h-4 mx-auto mb-1 text-pink-400" />
+                      <div className="text-[11px] font-bold">Presenter</div>
+                      <div className="text-[9px] opacity-75">Stage / Story</div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setRegRole('comms')}
+                      className={`p-2 rounded-xl border text-center transition-all ${
+                        regRole === 'comms'
+                          ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300 ring-1 ring-emerald-500/50'
+                          : 'bg-black/30 border-white/10 text-gray-400 hover:text-white'
+                      }`}
+                    >
+                      <Radio className="w-4 h-4 mx-auto mb-1 text-emerald-400" />
+                      <div className="text-[11px] font-bold">Comms</div>
+                      <div className="text-[9px] opacity-75">Timekeeping</div>
+                    </button>
+                  </div>
+                </div>
+
+                {regRole !== 'director' && (
+                  <div>
+                    <label className="text-[11px] font-bold text-gray-300 block mb-1 uppercase tracking-wider">
+                      Assigned Class Hub
+                    </label>
+                    <select
+                      value={regClassId}
+                      onChange={(e) => setRegClassId(e.target.value as ClassId)}
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-black/40 border border-white/10 text-white text-xs focus:outline-none focus:border-amber-500"
+                    >
+                      {CLASSES_CONFIG.map((c) => (
+                        <option key={c.id} value={c.id} className="bg-gray-900 text-white">
+                          {c.shortCode} - {c.name} ({c.ageGroup})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] font-bold text-gray-300 block mb-1 uppercase tracking-wider">
+                      Mobile Number
+                    </label>
+                    <input
+                      type="text"
+                      value={regPhone}
+                      onChange={(e) => setRegPhone(e.target.value)}
+                      placeholder="e.g. 082 123 4567"
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-black/40 border border-white/10 text-white placeholder-gray-500 text-xs focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-gray-300 block mb-1 uppercase tracking-wider">
+                      Security PIN
+                    </label>
+                    <input
+                      type="password"
+                      maxLength={6}
+                      value={regPin}
+                      onChange={(e) => setRegPin(e.target.value)}
+                      placeholder="e.g. 2026"
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-black/40 border border-white/10 text-white placeholder-gray-500 text-xs focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full py-2.5 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white text-xs font-bold rounded-xl shadow-lg shadow-amber-600/30 transition-all flex items-center justify-center gap-2"
+                >
+                  <Crown className="w-4 h-4" />
+                  <span>Create Account & Sign In As {regRole === 'director' ? 'Director' : regRole.toUpperCase()}</span>
                 </button>
               </form>
             )}

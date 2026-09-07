@@ -52,6 +52,8 @@ interface TechConsoleProps {
   activeEmergencyType: EmergencyActionType | null;
   lessonNotes: LessonNotesData;
   activeCues?: StageCueBroadcast[];
+  onCopyCue?: (cueId: string) => void;
+  currentUserId?: string;
   commsEmergencyAlerts?: CommsEmergencyAlert[];
   onAcknowledgeEmergency?: (id: string) => void;
   incidents?: IncidentLog[];
@@ -77,6 +79,8 @@ export const TechConsole: React.FC<TechConsoleProps> = ({
   activeEmergencyType,
   lessonNotes,
   activeCues = [],
+  onCopyCue,
+  currentUserId,
   commsEmergencyAlerts = [],
   onAcknowledgeEmergency,
   incidents = [],
@@ -84,31 +88,10 @@ export const TechConsole: React.FC<TechConsoleProps> = ({
   onResolveIncident,
   isClassAdmin = false,
 }) => {
-  // Worship Presenter Connection State
-  // "Plus the app is connected to the worship presenter we use, so unless it can be connected there’s no need for the emergency buttons, audio playlist, presentation of the slides."
-  const [isWorshipPresenterConnected, setIsWorshipPresenterConnected] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem('kch_worship_presenter_connected') === 'true';
-    } catch {
-      return false;
-    }
-  });
-
-  const toggleWorshipPresenterConnection = () => {
-    const nextState = !isWorshipPresenterConnected;
-    setIsWorshipPresenterConnected(nextState);
-    try {
-      localStorage.setItem('kch_worship_presenter_connected', String(nextState));
-    } catch {}
-  };
-
   // Add Checklist Modal State (for Class Admin)
   const [showAddChecklistModal, setShowAddChecklistModal] = useState(false);
   const [newChecklistLabel, setNewChecklistLabel] = useState('');
   const [newChecklistCategory, setNewChecklistCategory] = useState<'hardware' | 'audio' | 'media' | 'presentation' | 'general'>('hardware');
-
-  // Slide notes expanded
-  const [showSlideNotes, setShowSlideNotes] = useState(false);
 
   // Sound effects
   const [sfxPlaying, setSfxPlaying] = useState<string | null>(null);
@@ -130,20 +113,6 @@ export const TechConsole: React.FC<TechConsoleProps> = ({
     setNewChecklistLabel('');
     setShowAddChecklistModal(false);
   };
-
-  // Emergency buttons (only visible when Worship Presenter is connected)
-  const emergencyButtons: {
-    action: EmergencyActionType;
-    label: string;
-    color: string;
-    border: string;
-    icon: any;
-  }[] = [
-    { action: 'play_instrumental', label: 'Play Soft Instrumental', color: 'bg-blue-600 hover:bg-blue-500 text-white', border: 'border-blue-400/40', icon: Music },
-    { action: 'mute_music', label: 'Mute Audio Output', color: 'bg-red-600 hover:bg-red-500 text-white', border: 'border-red-400/40', icon: VolumeX },
-    { action: 'mute_mic', label: 'Mute Speaker Mic', color: 'bg-amber-600 hover:bg-amber-500 text-white', border: 'border-amber-400/40', icon: MicOff },
-    { action: 'blank_screen', label: 'Blackout / Blank Screen', color: 'bg-[#282840] hover:bg-[#343452] text-slate-200', border: 'border-slate-500/40', icon: Tv },
-  ];
 
   // DJ Booth SFX
   const playSoundEffect = (name: string, frequency: number, type: OscillatorType = 'sine') => {
@@ -172,7 +141,7 @@ export const TechConsole: React.FC<TechConsoleProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Top Banner with Worship Presenter Connection Status */}
+      {/* Top Banner */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#161626] p-4 sm:p-5 rounded-2xl border border-white/5 shadow-xl">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400 shadow-[0_0_15px_rgba(59,130,246,0.3)]">
@@ -181,40 +150,18 @@ export const TechConsole: React.FC<TechConsoleProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-base sm:text-lg font-bold text-white tracking-tight">TECH & SYSTEMS CONSOLE</h2>
-              <span className="px-2.5 py-0.5 rounded-full bg-blue-500/10 border border-blue-500/30 text-blue-300 text-[10px] font-bold uppercase tracking-widest">
-                INCOMING CUES RECEIVER
+              <span className="px-2.5 py-0.5 rounded-full bg-blue-500/10 border border-blue-500/30 text-blue-300 text-[10px] font-bold uppercase tracking-widest flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>LIVE COMMS DESK</span>
               </span>
             </div>
             <p className="text-xs text-gray-400">
-              Tech crew receives directives from Comms & Presenter. Audio/slides/emergency active when Worship Presenter is connected.
+              Tech booth receives stage cues & directives from Comms & Presenters. Tap "Copy" to confirm receipt.
             </p>
           </div>
         </div>
 
-        {/* Worship Presenter Connection Toggle */}
         <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={toggleWorshipPresenterConnection}
-            className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
-              isWorshipPresenterConnected
-                ? 'bg-emerald-600/20 text-emerald-300 border border-emerald-500/40 shadow-[0_0_15px_rgba(16,185,129,0.3)]'
-                : 'bg-white/5 hover:bg-white/10 text-gray-300 border border-white/10'
-            }`}
-            title="Toggle Worship Presenter connection"
-          >
-            {isWorshipPresenterConnected ? (
-              <>
-                <Link className="w-4 h-4 text-emerald-400" />
-                <span>Worship Presenter: Connected</span>
-              </>
-            ) : (
-              <>
-                <Unlink className="w-4 h-4 text-gray-400" />
-                <span>Worship Presenter: Disconnected</span>
-              </>
-            )}
-          </button>
-
           {isEmergencyActive && (
             <button
               onClick={clearEmergency}
@@ -419,339 +366,153 @@ export const TechConsole: React.FC<TechConsoleProps> = ({
           </div>
         </div>
 
-        {/* Center & Right Columns: Conditional on Worship Presenter Connection */}
-        {isWorshipPresenterConnected ? (
-          <>
-            {/* Center Column: Worship Queue & Lesson Slides (4 cols) */}
-            <div className="lg:col-span-4 space-y-6">
+        {/* Center & Right Columns: Tech Operations & Incoming Directives (8 cols) */}
+        <div className="lg:col-span-8 space-y-6">
 
-              {/* Worship Queue Card */}
-              <div className="bg-[#161626] rounded-2xl border border-white/5 p-5 shadow-xl space-y-3">
-                <div className="flex items-center justify-between pb-2 border-b border-white/5">
-                  <div>
-                    <span className="text-[10px] font-bold text-blue-400 uppercase tracking-[0.2em] block mb-0.5">
-                      AUDIO PLAYLIST (REMOTE)
-                    </span>
-                    <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
-                      <Music className="w-4 h-4 text-blue-400" />
-                      <span>Worship Queue</span>
-                    </h3>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  {worshipQueue.map((song) => (
-                    <div
-                      key={song.id}
-                      className={`p-3 rounded-xl border flex items-center justify-between transition-all ${
-                        song.isPlaying
-                          ? 'bg-blue-600/20 border-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.25)]'
-                          : 'bg-white/5 border-white/5 hover:border-white/20'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <button
-                          id={`btn-play-song-${song.id}`}
-                          onClick={() => setWorshipSong(song.id, !song.isPlaying)}
-                          className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
-                            song.isPlaying
-                              ? 'bg-blue-600 text-white shadow-[0_0_10px_rgba(59,130,246,0.5)]'
-                              : 'bg-black/40 text-gray-300 hover:bg-black/60'
-                          }`}
-                        >
-                          {song.isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 fill-current" />}
-                        </button>
-
-                        <div>
-                          <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
-                            <span>{song.title}</span>
-                            {song.isPlaying && (
-                              <span className="flex items-end gap-0.5 h-3">
-                                <span className="w-1 bg-blue-400 rounded-full animate-bounce h-2"></span>
-                                <span className="w-1 bg-blue-400 rounded-full animate-bounce delay-100 h-3"></span>
-                                <span className="w-1 bg-blue-400 rounded-full animate-bounce delay-200 h-1.5"></span>
-                              </span>
-                            )}
-                          </h4>
-                          <p className="text-[11px] text-gray-400">{song.artist}</p>
-                        </div>
-                      </div>
-
-                      <span className="text-xs font-mono font-semibold text-gray-300">{song.duration}</span>
-                    </div>
-                  ))}
-                </div>
+          {/* Incoming Directives & Cues Receiver with Copy / Roger That Acknowledgment */}
+          <div className="bg-[#161626] rounded-2xl border border-white/5 p-5 shadow-xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-white/5">
+              <div>
+                <span className="text-[10px] font-bold text-purple-400 uppercase tracking-[0.2em] block mb-0.5">
+                  LIVE DIRECTIVES & STAGE CUES FEED
+                </span>
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <ArrowDownLeft className="w-4 h-4 text-purple-400" />
+                  <span>Directives from Comms & Presenter (Incoming)</span>
+                </h3>
               </div>
-
-              {/* Lesson Slides Presentation Card */}
-              <div className="bg-[#161626] rounded-2xl border border-white/5 p-5 shadow-xl space-y-3">
-                <div className="flex items-center justify-between pb-2 border-b border-white/5">
-                  <div>
-                    <span className="text-[10px] font-bold text-blue-400 uppercase tracking-[0.2em] block mb-0.5">
-                      SLIDE PRESENTER (REMOTE)
-                    </span>
-                    <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
-                      <Film className="w-4 h-4 text-blue-400" />
-                      <span>Lesson Slides</span>
-                    </h3>
-                  </div>
-                  <span className="text-xs font-mono font-bold text-white bg-black/40 px-2.5 py-1 rounded-lg border border-white/10">
-                    {currentSlideIndex} / {totalSlides}
-                  </span>
-                </div>
-
-                {/* Slide Canvas */}
-                <div className="relative aspect-video rounded-xl bg-[#0e0e1a] border border-white/10 overflow-hidden flex flex-col items-center justify-center p-4 text-center">
-                  <div className="absolute top-2 right-2 px-2 py-0.5 rounded bg-black/80 text-[10px] font-mono text-blue-300 border border-white/10">
-                    SLIDE {currentSlideIndex}
-                  </div>
-                  <h4 className="text-sm font-extrabold text-white tracking-wide uppercase">
-                    Slide {currentSlideIndex} Presentation View
-                  </h4>
-                  <p className="text-xs text-gray-300 max-w-xs mt-1">
-                    {lessonNotes.memoryVerse || 'Scripture / Teaching Content'}
-                  </p>
-                </div>
-
-                {/* Slide Navigation Controls */}
-                <div className="flex items-center justify-between gap-2 pt-1">
-                  <button
-                    id="btn-prev-slide"
-                    onClick={() => setSlideIndex(currentSlideIndex - 1)}
-                    disabled={currentSlideIndex <= 1}
-                    className="flex-1 py-2 rounded-xl bg-white/5 hover:bg-white/10 disabled:opacity-30 text-xs font-bold text-gray-200 flex items-center justify-center gap-1 border border-white/10 transition-all"
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                    <span>Previous</span>
-                  </button>
-
-                  <button
-                    id="btn-slide-notes"
-                    onClick={() => setShowSlideNotes(!showSlideNotes)}
-                    className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1 border transition-all ${
-                      showSlideNotes
-                        ? 'bg-blue-600 text-white border-blue-400 shadow-[0_0_10px_rgba(59,130,246,0.4)]'
-                        : 'bg-white/5 text-gray-300 border-white/10 hover:text-white'
-                    }`}
-                  >
-                    <FileText className="w-3.5 h-3.5" />
-                    <span>Notes</span>
-                  </button>
-
-                  <button
-                    id="btn-next-slide"
-                    onClick={() => setSlideIndex(currentSlideIndex + 1)}
-                    disabled={currentSlideIndex >= totalSlides}
-                    className="flex-1 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-30 text-xs font-bold text-white flex items-center justify-center gap-1 shadow-[0_0_15px_rgba(59,130,246,0.4)] transition-all"
-                  >
-                    <span>Next</span>
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-                </div>
-
-                {showSlideNotes && (
-                  <div className="p-3 bg-black/40 rounded-xl border border-blue-500/30 text-xs space-y-1 animate-fadeIn">
-                    <span className="text-[10px] font-bold text-blue-400 uppercase">Slide Notes:</span>
-                    <p className="text-gray-300">
-                      {lessonNotes.notes?.[(currentSlideIndex - 1) % (lessonNotes.notes?.length || 1)] || 'No specific notes for this slide.'}
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Right Column: Emergency Controls & Incoming Feed (4 cols) */}
-            <div className="lg:col-span-4 space-y-6">
-              {/* Emergency Buttons Card */}
-              <div className="bg-[#161626] rounded-2xl border border-rose-500/30 p-5 shadow-xl space-y-3">
-                <div className="flex items-center justify-between pb-2 border-b border-white/5">
-                  <div className="flex items-center gap-2">
-                    <ShieldAlert className="w-4 h-4 text-rose-400" />
-                    <h3 className="text-sm font-bold text-white">Emergency Triggers</h3>
-                  </div>
-                  {isEmergencyActive && (
-                    <span className="px-2 py-0.5 rounded bg-rose-600 text-[10px] font-black text-white animate-pulse">
-                      ACTIVE
-                    </span>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  {emergencyButtons.map((btn) => {
-                    const IconComponent = btn.icon;
-                    const isThisActive = isEmergencyActive && activeEmergencyType === btn.action;
-
-                    return (
-                      <button
-                        key={btn.action}
-                        id={`btn-emergency-${btn.action}`}
-                        onClick={() => triggerEmergency(btn.action)}
-                        className={`w-full p-2.5 rounded-xl border ${btn.border} ${btn.color} text-xs font-bold flex items-center justify-center gap-2 transition-all active:scale-95 shadow-md ${
-                          isThisActive ? 'ring-2 ring-white animate-pulse' : ''
-                        }`}
-                      >
-                        <IconComponent className="w-4 h-4" />
-                        <span>{btn.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Incoming Feed for Tech (Tech only receives info, never sends) */}
-              <div className="bg-[#161626] rounded-2xl border border-white/5 p-5 shadow-xl space-y-3">
-                <div className="flex items-center justify-between pb-2 border-b border-white/5">
-                  <div className="flex items-center gap-2">
-                    <ArrowDownLeft className="w-4 h-4 text-purple-400" />
-                    <h3 className="text-sm font-bold text-white">Incoming Directives</h3>
-                  </div>
-                  <span className="text-[10px] text-gray-400 font-mono">Comms & Presenter</span>
-                </div>
-
-                <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                  {activeCues.length === 0 ? (
-                    <div className="p-3 rounded-xl bg-black/30 text-center text-xs text-gray-500">
-                      No active cues from Comms or Presenter.
-                    </div>
-                  ) : (
-                    activeCues.map((cue) => (
-                      <div
-                        key={cue.id}
-                        className={`p-2.5 rounded-xl border text-xs space-y-1 ${
-                          cue.priority === 'urgent'
-                            ? 'bg-amber-950/40 border-amber-500/40 text-amber-200'
-                            : 'bg-purple-950/30 border-purple-500/30 text-purple-200'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between font-bold">
-                          <span>{cue.title}</span>
-                          <span className="text-[10px] text-gray-400 font-mono">{cue.timestamp}</span>
-                        </div>
-                        <p className="text-[11px] text-gray-300">{cue.message}</p>
-                        <div className="text-[10px] text-gray-400">From: {cue.senderName} ({cue.senderRole})</div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              {/* SFX Triggers */}
-              <div className="bg-[#161626] rounded-2xl border border-white/5 p-4 space-y-2">
-                <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wider block">Booth SFX Audio</span>
-                <div className="grid grid-cols-3 gap-1.5">
-                  {[
-                    { name: 'Cheer', freq: 587, type: 'sine' as OscillatorType },
-                    { name: 'Horn', freq: 440, type: 'sawtooth' as OscillatorType },
-                    { name: 'Chime', freq: 880, type: 'triangle' as OscillatorType },
-                  ].map((sfx) => (
-                    <button
-                      key={sfx.name}
-                      onClick={() => playSoundEffect(sfx.name, sfx.freq, sfx.type)}
-                      className={`p-2 rounded-lg text-xs font-bold transition-all ${
-                        sfxPlaying === sfx.name
-                          ? 'bg-blue-600 text-white shadow-[0_0_10px_rgba(59,130,246,0.5)]'
-                          : 'bg-white/5 text-gray-300 hover:bg-white/10'
-                      }`}
-                    >
-                      🔊 {sfx.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </>
-        ) : (
-          /* When Worship Presenter is Disconnected (8 cols) */
-          <div className="lg:col-span-8 space-y-6">
-            <div className="bg-[#161626] rounded-2xl border border-white/5 p-6 sm:p-8 shadow-xl space-y-5 text-center sm:text-left">
-              <div className="flex flex-col sm:flex-row items-center gap-4">
-                <div className="w-14 h-14 rounded-2xl bg-blue-600/10 border border-blue-500/30 flex items-center justify-center text-blue-400 shrink-0 shadow-[0_0_20px_rgba(59,130,246,0.2)]">
-                  <Tv className="w-7 h-7" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2 justify-center sm:justify-start">
-                    <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse"></span>
-                    <h3 className="text-base font-bold text-white">External Worship Presenter in Use</h3>
-                  </div>
-                  <p className="text-xs text-gray-400 mt-1 max-w-xl">
-                    As configured, your room uses external worship presenter software (ProPresenter, EasyWorship, or physical video switcher).
-                    Slide presentation, worship audio playlist, and emergency buttons are handled directly by that hardware software and are hidden here.
-                  </p>
-                </div>
-              </div>
-
-              <div className="p-4 rounded-xl bg-black/40 border border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-                <div className="text-gray-300 space-y-0.5">
-                  <span className="font-bold text-white block">Need remote presentation & audio controls here?</span>
-                  <span>Connect this web app to your worship presenter bridge to enable remote slides and emergency blackout.</span>
-                </div>
-                <button
-                  onClick={toggleWorshipPresenterConnection}
-                  className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-[0_0_15px_rgba(59,130,246,0.4)] transition-all shrink-0"
-                >
-                  <Link className="w-4 h-4" />
-                  <span>Connect Worship Presenter</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Incoming Directives & Cues Receiver (Tech only receives, never sends) */}
-            <div className="bg-[#161626] rounded-2xl border border-white/5 p-5 shadow-xl space-y-4">
-              <div className="flex items-center justify-between pb-3 border-b border-white/5">
-                <div>
-                  <span className="text-[10px] font-bold text-purple-400 uppercase tracking-[0.2em] block mb-0.5">
-                    INCOMING COMMUNICATION FEED
-                  </span>
-                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                    <ArrowDownLeft className="w-4 h-4 text-purple-400" />
-                    <span>Directives from Comms & Presenter (Read-Only)</span>
-                  </h3>
-                </div>
+              <div className="flex items-center gap-2">
                 <span className="text-[10px] font-mono text-purple-300 bg-black/40 px-2.5 py-1 rounded-lg border border-white/10">
                   {activeCues.length} Active Directives
                 </span>
               </div>
+            </div>
 
-              <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1">
-                {activeCues.length === 0 ? (
-                  <div className="p-6 rounded-xl bg-white/5 border border-dashed border-white/10 text-center text-xs text-gray-400 space-y-1.5">
-                    <Clock className="w-6 h-6 mx-auto text-gray-500 opacity-60" />
-                    <p>No active directives from Comms or Presenter.</p>
-                    <p className="text-[11px] text-gray-500">
-                      When Comms or the Presenter posts stage cues or timeline adjustments, they will appear here automatically.
-                    </p>
-                  </div>
-                ) : (
-                  activeCues.map((cue) => (
+            <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
+              {activeCues.length === 0 ? (
+                <div className="p-8 rounded-xl bg-white/5 border border-dashed border-white/10 text-center text-xs text-gray-400 space-y-2">
+                  <Clock className="w-8 h-8 mx-auto text-gray-500 opacity-60" />
+                  <p className="font-bold text-gray-300">No active directives or cues.</p>
+                  <p className="text-[11px] text-gray-500 max-w-md mx-auto">
+                    When Comms or the Presenter dispatches stage cues, timing alerts, or instructions, they appear here in real-time. Click "Copy" on any message to let the sender know you've received it.
+                  </p>
+                </div>
+              ) : (
+                activeCues.map((cue) => {
+                  const hasCopied = cue.copies?.some((c) => c.userId === currentUserId);
+
+                  return (
                     <div
                       key={cue.id}
-                      className={`p-3 rounded-xl border space-y-1.5 transition-all ${
+                      className={`p-4 rounded-2xl border space-y-3 transition-all ${
                         cue.priority === 'urgent'
-                          ? 'bg-amber-950/40 border-amber-500/40 text-amber-200 shadow-sm'
+                          ? 'bg-amber-950/40 border-amber-500/50 text-amber-200 shadow-md'
                           : 'bg-white/5 border-white/10 text-gray-300'
                       }`}
                     >
                       <div className="flex items-center justify-between text-xs font-bold">
                         <div className="flex items-center gap-2">
-                          <span className="text-white">{cue.title}</span>
-                          <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono">
+                          <span className="text-white text-sm">{cue.title}</span>
+                          <span className="text-[9px] uppercase px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono">
                             {cue.senderRole.toUpperCase()}
                           </span>
+                          {cue.priority === 'urgent' && (
+                            <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold animate-pulse">
+                              Urgent
+                            </span>
+                          )}
                         </div>
                         <span className="text-[10px] text-gray-400 font-mono">{cue.timestamp}</span>
                       </div>
-                      <p className="text-xs text-gray-200">{cue.message}</p>
-                      <div className="text-[10px] text-gray-400">
-                        Dispatched by: <span className="text-gray-300">{cue.senderName}</span>
+
+                      <p className="text-sm font-semibold text-gray-100 bg-black/30 p-2.5 rounded-xl border border-white/5">
+                        {cue.message}
+                      </p>
+
+                      <div className="text-[11px] text-gray-400">
+                        Dispatched by: <strong className="text-white">{cue.senderName}</strong> ({cue.senderRole})
+                      </div>
+
+                      {/* COPY / ROGER THAT ACKNOWLEDGMENT BAR */}
+                      <div className="pt-2 border-t border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                        <div>
+                          {hasCopied ? (
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-emerald-500/20 border border-emerald-500/50 text-emerald-300 text-xs font-bold shadow-[0_0_12px_rgba(16,185,129,0.25)]">
+                              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                              <span>✓ You Copied This Directive</span>
+                            </span>
+                          ) : (
+                            <button
+                              id={`btn-copy-tech-${cue.id}`}
+                              onClick={() => onCopyCue && onCopyCue(cue.id)}
+                              className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-black uppercase tracking-wider flex items-center gap-2 shadow-[0_0_15px_rgba(16,185,129,0.4)] transition-all active:scale-95 animate-pulse cursor-pointer"
+                            >
+                              <Radio className="w-4 h-4" />
+                              <span>Say "Copy" (Confirm Receipt)</span>
+                            </button>
+                          )}
+                        </div>
+
+                        {/* List of everyone who said copy */}
+                        <div className="text-[11px] text-gray-400">
+                          {cue.copies && cue.copies.length > 0 ? (
+                            <span className="text-emerald-400 font-medium">
+                              ✓ Received by: {cue.copies.map((c) => `${c.userName} (${c.userRole})`).join(', ')}
+                            </span>
+                          ) : (
+                            <span className="text-amber-400/80 italic text-[11px]">
+                              ⏳ Awaiting acknowledgments
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  ))
-                )}
-              </div>
+                  );
+                })
+              )}
             </div>
           </div>
-        )}
 
+          {/* Booth Quick SFX Audio Soundboard */}
+          <div className="bg-[#161626] rounded-2xl border border-white/5 p-5 shadow-xl space-y-3">
+            <div className="flex items-center justify-between pb-2 border-b border-white/5">
+              <div>
+                <span className="text-[10px] font-bold text-blue-400 uppercase tracking-[0.2em] block mb-0.5">
+                  AUDIO BOOTH
+                </span>
+                <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
+                  <Volume2 className="w-4 h-4 text-blue-400" />
+                  <span>Quick SFX Audio Soundboard</span>
+                </h3>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
+              {[
+                { name: 'Cheer', freq: 587, type: 'sine' as OscillatorType },
+                { name: 'Horn', freq: 440, type: 'sawtooth' as OscillatorType },
+                { name: 'Chime', freq: 880, type: 'triangle' as OscillatorType },
+                { name: 'Roger Beep', freq: 1200, type: 'sine' as OscillatorType },
+                { name: 'Alert', freq: 650, type: 'square' as OscillatorType },
+                { name: 'Victory', freq: 784, type: 'sine' as OscillatorType },
+              ].map((sfx) => (
+                <button
+                  key={sfx.name}
+                  onClick={() => playSoundEffect(sfx.name, sfx.freq, sfx.type)}
+                  className={`p-3 rounded-xl text-xs font-bold transition-all border flex flex-col items-center gap-1 ${
+                    sfxPlaying === sfx.name
+                      ? 'bg-blue-600 text-white border-blue-400 shadow-[0_0_10px_rgba(59,130,246,0.5)]'
+                      : 'bg-white/5 text-gray-300 border-white/5 hover:bg-white/10 hover:border-white/20'
+                  }`}
+                >
+                  <span className="text-base">🔊</span>
+                  <span>{sfx.name}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+        </div>
       </div>
 
       {/* Add Checklist Item Modal (Class Admin) */}

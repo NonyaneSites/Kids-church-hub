@@ -89,6 +89,13 @@ export type QuickMessageType =
   | 'finish'
   | 'custom';
 
+export interface StageCueCopyAck {
+  userId: string;
+  userName: string;
+  userRole: Role;
+  copiedAt: string; // e.g. "09:42"
+}
+
 export interface StageCueBroadcast {
   id: string;
   type: QuickMessageType;
@@ -100,6 +107,8 @@ export interface StageCueBroadcast {
   expiresAt: string;
   priority: 'normal' | 'urgent' | 'emergency';
   acknowledged?: boolean;
+  targetClassId?: ClassId | 'all';
+  copies?: StageCueCopyAck[];
 }
 
 export type EmergencyActionType = 
@@ -197,6 +206,7 @@ export interface AuthUser {
   pin?: string; // 4-6 digit security PIN or password for secure authentication
   isClassAdmin?: boolean; // Granted exclusively by Director
   isAdminPromotedBy?: string;
+  createdAt?: string;
   isAuthenticated: boolean;
 }
 
@@ -210,6 +220,7 @@ export interface DirectorAnnouncement {
   timestamp: string;
   severity: 'normal' | 'important' | 'emergency';
   expiresAt?: string;
+  copies?: StageCueCopyAck[];
 }
 
 export interface ClassHubData {
@@ -262,6 +273,7 @@ export interface BroadcastChannelEvent<T = unknown> {
   type: 'broadcast';
   event: 
     | 'STAGE_CUE'
+    | 'CUE_COPIED'
     | 'SERVICE_STATE_UPDATE'
     | 'HOLY_SPIRIT_OVERRIDE'
     | 'EMERGENCY_OVERRIDE'
@@ -311,6 +323,7 @@ export interface CommsEmergencyAlert {
   senderName: string;
   timestamp: string;
   acknowledged?: boolean;
+  copies?: StageCueCopyAck[];
 }
 
 // Convenient aliases

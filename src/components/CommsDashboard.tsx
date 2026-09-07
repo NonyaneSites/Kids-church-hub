@@ -23,7 +23,7 @@ import {
   Layers,
   AlertTriangle
 } from 'lucide-react';
-import { ServiceSegment, QuickMessageType, QuickStagePreset, Role } from '../types/hub';
+import { ServiceSegment, QuickMessageType, QuickStagePreset, Role, StageCueBroadcast } from '../types/hub';
 
 interface CommsDashboardProps {
   segments: ServiceSegment[];
@@ -51,6 +51,10 @@ interface CommsDashboardProps {
   onOpenHolySpiritModal: () => void;
   onSwitchToPresenter: () => void;
   isClassAdmin?: boolean;
+  activeCues?: StageCueBroadcast[];
+  dismissCue?: (id: string) => void;
+  onCopyCue?: (id: string) => void;
+  currentUserId?: string;
 }
 
 export const CommsDashboard: React.FC<CommsDashboardProps> = ({
@@ -72,6 +76,10 @@ export const CommsDashboard: React.FC<CommsDashboardProps> = ({
   onOpenHolySpiritModal,
   onSwitchToPresenter,
   isClassAdmin = false,
+  activeCues = [],
+  dismissCue,
+  onCopyCue,
+  currentUserId,
 }) => {
   const [customCueText, setCustomCueText] = useState('');
   const [selectedRecipient, setSelectedRecipient] = useState('Tech Crew');
@@ -544,6 +552,79 @@ export const CommsDashboard: React.FC<CommsDashboardProps> = ({
                 <span>Send</span>
               </button>
             </form>
+
+            {/* Live Directives & "Copy" Acknowledgment Receipts Feed */}
+            {activeCues && activeCues.length > 0 && (
+              <div className="pt-3 mt-3 border-t border-white/5 space-y-2">
+                <div className="flex items-center justify-between text-[11px] font-bold">
+                  <span className="text-purple-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <Radio className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Dispatched Cues & "Copy" Receipts ({activeCues.length})</span>
+                  </span>
+                  <span className="text-[10px] text-gray-400 font-mono">Live Sync</span>
+                </div>
+
+                <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                  {activeCues.map((cue) => {
+                    const hasCopied = cue.copies?.some((c) => c.userId === currentUserId);
+
+                    return (
+                      <div
+                        key={cue.id}
+                        className="p-2.5 rounded-xl bg-black/40 border border-purple-500/20 text-xs space-y-1.5"
+                      >
+                        <div className="flex items-center justify-between font-bold">
+                          <div className="flex items-center gap-2">
+                            <span className="text-white">{cue.title}</span>
+                            <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300">
+                              {cue.priority}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-gray-400 font-mono">{cue.timestamp}</span>
+                            {dismissCue && (
+                              <button
+                                onClick={() => dismissCue(cue.id)}
+                                className="text-gray-500 hover:text-white p-0.5"
+                                title="Dismiss cue"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        <p className="text-gray-300 text-[11px]">{cue.message}</p>
+
+                        <div className="flex flex-wrap items-center justify-between gap-1.5 pt-1 border-t border-white/5 text-[10px]">
+                          <div>
+                            {cue.copies && cue.copies.length > 0 ? (
+                              <span className="text-emerald-400 font-bold flex items-center gap-1">
+                                <CheckCircle2 className="w-3 h-3" />
+                                <span>Copied by: {cue.copies.map((c) => `${c.userName} (${c.userRole})`).join(', ')}</span>
+                              </span>
+                            ) : (
+                              <span className="text-amber-400/80 italic">
+                                ⏳ Waiting for Tech / Presenter to say "Copy"...
+                              </span>
+                            )}
+                          </div>
+
+                          {!hasCopied && onCopyCue && (
+                            <button
+                              onClick={() => onCopyCue(cue.id)}
+                              className="px-2 py-0.5 rounded-lg bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40 font-bold text-[10px]"
+                            >
+                              Say "Copy"
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
         </div>

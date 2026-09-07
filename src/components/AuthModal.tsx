@@ -228,9 +228,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [regEmail, setRegEmail] = useState('');
   const [regPin, setRegPin] = useState('2026');
   const [regPhone, setRegPhone] = useState('');
-  const [regRole, setRegRole] = useState<Role>('tech');
-  const [regClassId, setRegClassId] = useState<ClassId>(defaultClass);
-  const [regRoleTitle, setRegRoleTitle] = useState('');
+  const [regRole, setRegRole] = useState<Role>('director');
+  const [regClassId, setRegClassId] = useState<ClassId>('all');
+  const [regRoleTitle, setRegRoleTitle] = useState('Ministry Director');
   const [regAvatarColor, setRegAvatarColor] = useState(AVATAR_COLORS[1]);
   const [regIsClassAdmin, setRegIsClassAdmin] = useState(false);
 
@@ -319,15 +319,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
-    // Class admins can only create accounts for their own class
-    const effectiveClassId: ClassId = isClassAdmin && currentUser.assignedClassId !== 'all' 
-      ? currentUser.assignedClassId 
-      : regClassId;
+    // If role is director, effective class is always 'all'
+    const effectiveClassId: ClassId = regRole === 'director' 
+      ? 'all'
+      : (isClassAdmin && currentUser.assignedClassId !== 'all' ? currentUser.assignedClassId : regClassId);
 
-    // Class admins cannot create directors
-    const effectiveRole: Role = isClassAdmin && regRole === 'director'
-      ? 'tech'
-      : regRole;
+    // Ensure the selected role is preserved exactly as chosen
+    const effectiveRole: Role = regRole;
 
     const classInfo = CLASSES_CONFIG.find(c => c.id === effectiveClassId);
     const fallbackTitle = effectiveClassId === 'all'
@@ -947,21 +945,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     <div className="text-[9px] opacity-75">Timeline / Cues</div>
                   </button>
 
-                  {isDirector && (
-                    <button
-                      type="button"
-                      onClick={() => setRegRole('director')}
-                      className={`p-2.5 rounded-xl border text-center transition-all ${
-                        regRole === 'director'
-                          ? 'bg-amber-500/20 border-amber-500 text-amber-300'
-                          : 'bg-black/30 border-white/10 text-gray-400 hover:text-white'
-                      }`}
-                    >
-                      <Crown className="w-4 h-4 mx-auto mb-1" />
-                      <div className="text-[11px] font-bold">Director</div>
-                      <div className="text-[9px] opacity-75">Overall Lead</div>
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRegRole('director');
+                      setRegClassId('all');
+                      setRegRoleTitle('Ministry Director');
+                      setRegAvatarColor('from-amber-500 to-orange-600');
+                    }}
+                    className={`p-2.5 rounded-xl border text-center transition-all ${
+                      regRole === 'director'
+                        ? 'bg-amber-500/20 border-amber-500 text-amber-300 ring-1 ring-amber-500/50'
+                        : 'bg-black/30 border-white/10 text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    <Crown className="w-4 h-4 mx-auto mb-1 text-amber-400" />
+                    <div className="text-[11px] font-bold">Director</div>
+                    <div className="text-[9px] opacity-75">Overall Lead</div>
+                  </button>
                 </div>
               </div>
 

@@ -75,6 +75,7 @@ export default function App() {
     localTimer,
     sendStageCue,
     dismissCue,
+    acknowledgeCopyCue,
     holySpiritOverride,
     triggerEmergency,
     clearEmergency,
@@ -172,6 +173,7 @@ export default function App() {
       <SignInGate
         onSignIn={(user) => {
           switchAuthUser(user);
+          setActiveRole(user.role);
           if (user.role === 'tech') setActiveTab('tech');
           else if (user.role === 'presenter') setActiveTab('presenter');
           else if (user.role === 'comms') setActiveTab('comms');
@@ -179,6 +181,7 @@ export default function App() {
           else setActiveTab('comms');
         }}
         registeredAccounts={registeredAccounts}
+        onAddNewAccount={addNewAccount}
       />
     );
   }
@@ -367,6 +370,10 @@ export default function App() {
             onOpenHolySpiritModal={() => setIsHolySpiritModalOpen(true)}
             onSwitchToPresenter={() => setActiveTab('presenter')}
             isClassAdmin={isClassAdmin}
+            activeCues={activeCues}
+            dismissCue={dismissCue}
+            onCopyCue={acknowledgeCopyCue}
+            currentUserId={authUser?.id}
           />
         )}
 
@@ -395,6 +402,8 @@ export default function App() {
             onAddIncident={addIncident}
             onResolveIncident={resolveIncident}
             isClassAdmin={isClassAdmin}
+            onCopyCue={acknowledgeCopyCue}
+            currentUserId={authUser?.id}
           />
         )}
 
@@ -408,6 +417,8 @@ export default function App() {
             dismissCue={dismissCue}
             lessonNotes={lessonNotes}
             onOpenHolySpiritModal={() => setIsHolySpiritModalOpen(true)}
+            onCopyCue={acknowledgeCopyCue}
+            currentUserId={authUser?.id}
           />
         )}
 

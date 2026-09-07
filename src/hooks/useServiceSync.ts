@@ -6,6 +6,7 @@ import {
   PreServiceCheckItem,
   WorshipSong,
   StageCueBroadcast,
+  StageCueCopyAck,
   QuickMessageType,
   EmergencyActionType,
   EmergencyBroadcast,
@@ -47,6 +48,8 @@ import {
   dbSyncWithSupabase,
   subscribeToSupabaseAccounts,
 } from '../lib/supabase';
+import { subscribeToFirestoreAccounts } from '../lib/firebase';
+import { dbSyncFirestoreAccounts } from '../lib/database';
 import { CLASSES_CONFIG, getAllDefaultClassHubs } from '../data/classHubsData';
 
 // Persistent storage keys
@@ -337,6 +340,30 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
     }
   }, []);
 
+  // Radio 'Roger / Copy That' dual-tone acknowledgment sound
+  const playRogerBeep = useCallback(() => {
+    try {
+      const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!AudioContextClass) return;
+      const ctx = new AudioContextClass();
+      if (ctx.state === 'suspended') {
+        ctx.resume();
+      }
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(880, ctx.currentTime); // A5
+      osc.frequency.setValueAtTime(1174.66, ctx.currentTime + 0.07); // D6
+      gain.gain.setValueAtTime(0.12, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.005, ctx.currentTime + 0.16);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.16);
+    } catch {}
+  }, []);
+
   // Broadcast dispatch method supporting Supabase broadcast and BroadcastChannel API
   const dispatchBroadcast = useCallback(<T,>(event: BroadcastChannelEvent<T>['event'], payload: T) => {
     const message: BroadcastChannelEvent<T> = {
@@ -375,6 +402,24 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
             const cue = data.payload as StageCueBroadcast;
             setActiveCues((prev) => [cue, ...prev.filter((c) => c.id !== cue.id)]);
             playCueSound(cue.priority);
+            break;
+          }
+          case 'CUE_COPIED': {
+            const { cueId, ack } = data.payload as { cueId: string; ack: StageCueCopyAck };
+            if (cueId && ack) {
+              setActiveCues((prev) =>
+                prev.map((c) => {
+                  if (c.id === cueId) {
+                    const copies = c.copies || [];
+                    if (!copies.some((cp) => cp.userId === ack.userId)) {
+                      return { ...c, copies: [...copies, ack] };
+                    }
+                  }
+                  return c;
+                })
+              );
+              playRogerBeep();
+            }
             break;
           }
           case 'SERVICE_STATE_UPDATE': {
@@ -474,7 +519,20 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
         channel.close();
       };
     }
-  }, [playCueSound]);
+  }, [playCueSound, playRogerBeep]);
+
+  // Real-time Firestore account listener: keeps accounts synced live across all browser windows and tabs
+  useEffect(() => {
+    const unsubscribe = subscribeToFirestoreAccounts((remoteAccounts) => {
+      if (remoteAccounts && remoteAccounts.length > 0) {
+        const merged = dbSyncFirestoreAccounts(remoteAccounts);
+        setRegisteredAccounts(merged);
+      }
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, []);
 
   // Connect to Supabase Realtime Channel if client is available
   useEffect(() => {
@@ -635,6 +693,58 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
   const dismissCue = useCallback((cueId: string) => {
     setActiveCues((prev) => prev.filter((c) => c.id !== cueId));
   }, []);
+
+  // Acknowledge a stage cue or message by saying "Copy That"
+  const acknowledgeCopyCue = useCallback(
+    (cueId: string) => {
+      const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const ack: StageCueCopyAck = {
+        userId: authUser.id || `usr_${Date.now()}`,
+        userName: authUser.name || 'Team Member',
+        userRole: authUser.role || activeRole,
+        copiedAt: timeStr,
+      };
+
+      setActiveCues((prev) =>
+        prev.map((c) => {
+          if (c.id === cueId) {
+            const copies = c.copies || [];
+            if (!copies.some((cp) => cp.userId === ack.userId)) {
+              return { ...c, copies: [...copies, ack] };
+            }
+          }
+          return c;
+        })
+      );
+
+      // Sync to all class hubs storage
+      setAllClassHubs((prev) => {
+        const updated = { ...prev };
+        Object.keys(updated).forEach((cid) => {
+          const classHub = updated[cid as ClassId];
+          if (classHub && classHub.activeCues) {
+            updated[cid as ClassId] = {
+              ...classHub,
+              activeCues: classHub.activeCues.map((c) => {
+                if (c.id === cueId) {
+                  const copies = c.copies || [];
+                  if (!copies.some((cp) => cp.userId === ack.userId)) {
+                    return { ...c, copies: [...copies, ack] };
+                  }
+                }
+                return c;
+              }),
+            };
+          }
+        });
+        return updated;
+      });
+
+      dispatchBroadcast('CUE_COPIED', { cueId, ack });
+      playRogerBeep();
+    },
+    [authUser, activeRole, dispatchBroadcast, playRogerBeep]
+  );
 
   // Holy Spirit Mode Override Handler
   const holySpiritOverride = useCallback(
@@ -904,8 +1014,13 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
   const addNewAccount = useCallback((newUser: AuthUser) => {
     const updated = saveNewAccount(newUser);
     setRegisteredAccounts(updated);
+    setAuthUser(newUser);
+    saveStoredAuthUser(newUser);
+    if (newUser.assignedClassId && newUser.assignedClassId !== 'all') {
+      switchClassHub(newUser.assignedClassId);
+    }
     return updated;
-  }, []);
+  }, [switchClassHub]);
 
   const promoteToClassAdmin = useCallback((userId: string) => {
     if (authUser.role !== 'director') {
@@ -963,8 +1078,9 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
 
     // 2. Realtime listener for accounts table changes
     const unsubscribe = subscribeToSupabaseAccounts((updatedAccounts) => {
-      if (isMounted && Array.isArray(updatedAccounts)) {
-        setRegisteredAccounts(updatedAccounts);
+      if (isMounted && Array.isArray(updatedAccounts) && updatedAccounts.length > 0) {
+        const merged = dbSyncFirestoreAccounts(updatedAccounts);
+        setRegisteredAccounts(merged);
       }
     });
 
@@ -1594,6 +1710,7 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
     localTimer,
     sendStageCue,
     dismissCue,
+    acknowledgeCopyCue,
     holySpiritOverride,
     triggerEmergency,
     clearEmergency,
