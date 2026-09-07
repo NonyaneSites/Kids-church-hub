@@ -52,7 +52,7 @@ interface MobileAppViewProps {
   onRoleChange: (role: Role) => void;
   selectedClassId: ClassId;
   onSelectClass: (classId: ClassId) => void;
-  currentSegment: ServiceSegment;
+  currentSegment: ServiceSegment | null;
   nextSegment: ServiceSegment | null;
   segments: ServiceSegment[];
   localTimer: {
@@ -139,7 +139,7 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
   };
 
   const handleCallPresenter = () => {
-    const speaker = currentSegment.speaker || 'Presenter';
+    const speaker = currentSegment?.speaker || 'Presenter';
     setPresenterAlertNotice(`📢 Call dispatched: "${speaker}, please come to ${activeClass.name} class in 5 minutes!"`);
     sendStageCue(`📢 Alert: ${speaker} requested in class immediately!`);
     setTimeout(() => setPresenterAlertNotice(null), 7000);
@@ -283,7 +283,7 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-green-500 animate-ping"></span>
             <span className="text-[10px] font-black uppercase tracking-widest text-green-400">
-              {currentSegment.status === 'in_progress' ? 'CURRENTLY LIVE' : 'UPCOMING'}
+              {currentSegment?.status === 'in_progress' ? 'CURRENTLY LIVE' : 'UPCOMING'}
             </span>
           </div>
 
@@ -296,12 +296,12 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
         <div className="flex items-end justify-between gap-3">
           <div>
             <h2 className="text-lg font-black text-white leading-tight">
-              {currentSegment.title}
+              {currentSegment?.title || 'Waiting for Service Flow'}
             </h2>
             <div className="text-xs text-purple-300 font-semibold mt-0.5">
-              Leader: {currentSegment.speaker || 'Team Leader'} • {currentSegment.durationMinutes}m
+              Leader: {currentSegment?.speaker || 'Team Leader'} • {currentSegment?.durationMinutes || 0}m
             </div>
-            {currentSegment.scripture && (
+            {currentSegment?.scripture && (
               <span className="inline-block mt-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40 font-serif">
                 📖 {currentSegment.scripture}
               </span>
@@ -336,8 +336,9 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
         {/* Fast Action Controls */}
         <div className="flex items-center gap-2 pt-1">
           <button
-            onClick={() => completeSegment(currentSegment.id)}
-            className="flex-1 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-purple-600/30 transition-all active:scale-95"
+            onClick={() => currentSegment && completeSegment(currentSegment.id)}
+            disabled={!currentSegment}
+            className="flex-1 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-purple-600/30 transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <CheckCircle2 className="w-4 h-4" />
             <span>Mark Done & Next</span>
@@ -390,14 +391,14 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
             {/* Service Segments List */}
             <div className="space-y-2.5">
               {segments.map((seg, idx) => {
-                const isCurrent = seg.id === currentSegment.id;
-                const isCompleted = seg.status === 'completed';
+                const isCurrent = currentSegment ? seg.id === currentSegment.id : false;
+                const isCompleted = seg?.status === 'completed';
 
                 return (
                   <div
                     key={seg.id}
                     onClick={() => {
-                      if (seg.status === 'completed') {
+                      if (seg?.status === 'completed') {
                         startSegment(seg.id);
                       } else {
                         completeSegment(seg.id);
@@ -482,7 +483,7 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
             </div>
 
             {/* Huge Scripture Display */}
-            {currentSegment.scripture && (
+            {currentSegment?.scripture && (
               <div className="p-4 rounded-2xl bg-[#16162a] border border-purple-500/40 space-y-2">
                 <span className="text-[10px] font-bold uppercase tracking-widest text-purple-400 block">
                   SCRIPTURE READING

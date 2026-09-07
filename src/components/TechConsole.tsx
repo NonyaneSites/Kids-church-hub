@@ -375,7 +375,7 @@ export const TechConsole: React.FC<TechConsoleProps> = ({
               <div className="flex items-center gap-2">
                 <Radio className="w-3.5 h-3.5 text-rose-400 animate-pulse" />
                 <h4 className="text-xs font-bold text-white uppercase tracking-wider">
-                  Live Incidents ({incidents.filter((i) => i.status === 'open').length})
+                  Live Incidents ({incidents.filter((i) => i?.status === 'open').length})
                 </h4>
               </div>
               <button
@@ -388,13 +388,13 @@ export const TechConsole: React.FC<TechConsoleProps> = ({
             </div>
 
             <div className="space-y-2 max-h-36 overflow-y-auto pr-1">
-              {incidents.filter((i) => i.status === 'open').length === 0 ? (
+              {incidents.filter((i) => i?.status === 'open').length === 0 ? (
                 <div className="p-3 rounded-xl bg-black/30 text-center text-[11px] text-gray-500">
                   No active equipment incidents reported.
                 </div>
               ) : (
                 incidents
-                  .filter((i) => i.status === 'open')
+                  .filter((i) => i?.status === 'open')
                   .map((inc) => (
                     <div
                       key={inc.id}

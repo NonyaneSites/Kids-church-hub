@@ -182,7 +182,7 @@ export const CommsDashboard: React.FC<CommsDashboardProps> = ({
   };
 
   // Completed segment count
-  const completedCount = segments.filter((s) => s.status === 'completed').length;
+  const completedCount = segments.filter((s) => s?.status === 'completed').length;
   const totalCount = segments.length;
   const overallPercentage = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 
@@ -294,9 +294,9 @@ export const CommsDashboard: React.FC<CommsDashboardProps> = ({
                 <div
                   key={seg.id}
                   className={`p-3 rounded-xl border transition-all text-xs space-y-1.5 ${
-                    seg.status === 'in-progress'
+                    seg?.status === 'in-progress'
                       ? 'bg-purple-600/20 border-purple-500/50 shadow-[0_0_15px_rgba(168,85,247,0.25)]'
-                      : seg.status === 'completed'
+                      : seg?.status === 'completed'
                       ? 'bg-black/30 border-white/5 text-gray-400'
                       : 'bg-white/5 border-white/5 hover:border-white/15'
                   }`}
@@ -305,7 +305,7 @@ export const CommsDashboard: React.FC<CommsDashboardProps> = ({
                     <div className="flex items-center gap-2">
                       <span className="font-mono text-[10px] text-gray-400">#{idx + 1}</span>
                       <h4 className="font-bold text-white text-xs">{seg.title}</h4>
-                      {seg.status === 'in-progress' && (
+                      {seg?.status === 'in-progress' && (
                         <span className="px-1.5 py-0.2 rounded bg-purple-500 text-[9px] font-black text-white animate-pulse">
                           LIVE
                         </span>
@@ -336,7 +336,7 @@ export const CommsDashboard: React.FC<CommsDashboardProps> = ({
 
                   {/* Segment Action Buttons */}
                   <div className="flex items-center gap-2 pt-1 border-t border-white/5">
-                    {seg.status !== 'in-progress' && seg.status !== 'completed' && (
+                    {seg?.status !== 'in-progress' && seg?.status !== 'completed' && (
                       <button
                         onClick={() => startSegment(seg.id, seg.durationMinutes)}
                         className="px-2.5 py-1 rounded-lg bg-purple-600/30 hover:bg-purple-600 text-purple-200 hover:text-white font-bold text-[10px] flex items-center gap-1 transition-all"
@@ -346,7 +346,7 @@ export const CommsDashboard: React.FC<CommsDashboardProps> = ({
                       </button>
                     )}
 
-                    {seg.status === 'in-progress' && (
+                    {seg?.status === 'in-progress' && (
                       <button
                         onClick={() => completeSegment(seg.id)}
                         className="px-2.5 py-1 rounded-lg bg-emerald-600/30 hover:bg-emerald-600 text-emerald-200 hover:text-white font-bold text-[10px] flex items-center gap-1 transition-all"
@@ -356,7 +356,7 @@ export const CommsDashboard: React.FC<CommsDashboardProps> = ({
                       </button>
                     )}
 
-                    {seg.status === 'completed' && (
+                    {seg?.status === 'completed' && (
                       <span className="text-[10px] text-emerald-400 font-bold flex items-center gap-1">
                         <CheckCircle2 className="w-3 h-3" />
                         <span>Completed</span>

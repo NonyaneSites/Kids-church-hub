@@ -44,6 +44,8 @@ import {
   resetToSeedAccounts,
   updateAccountAdminStatus,
   updateAccountPin,
+  dbSyncWithSupabase,
+  subscribeToSupabaseAccounts,
 } from '../lib/supabase';
 import { CLASSES_CONFIG, getAllDefaultClassHubs } from '../data/classHubsData';
 
@@ -948,6 +950,38 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
     return updated;
   }, []);
 
+  // Supabase cloud sync & realtime listener for staff accounts
+  useEffect(() => {
+    let isMounted = true;
+
+    // 1. Initial background sync
+    dbSyncWithSupabase().then((res) => {
+      if (isMounted && res.synced && res.accounts.length > 0) {
+        setRegisteredAccounts(res.accounts);
+      }
+    });
+
+    // 2. Realtime listener for accounts table changes
+    const unsubscribe = subscribeToSupabaseAccounts((updatedAccounts) => {
+      if (isMounted && Array.isArray(updatedAccounts)) {
+        setRegisteredAccounts(updatedAccounts);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
+  }, []);
+
+  const syncAccountsWithCloud = useCallback(async () => {
+    const res = await dbSyncWithSupabase();
+    if (res.synced && res.accounts.length > 0) {
+      setRegisteredAccounts(res.accounts);
+    }
+    return res;
+  }, []);
+
   const removeTeamMember = useCallback((memberId: string) => {
     const isDirector = authUser.role === 'director' || (authUser.role === 'admin' && authUser.assignedClassId === 'all');
     const isClassAdmin = authUser.isClassAdmin || authUser.role === 'admin';
@@ -1606,6 +1640,7 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
     deleteUserAccount,
     clearAllDefaultAccounts,
     resetDefaultAccounts,
+    syncAccountsWithCloud,
     promoteToClassAdmin,
     revokeClassAdmin,
     removeTeamMember,

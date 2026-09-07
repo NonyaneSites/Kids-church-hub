@@ -18,7 +18,7 @@ import { ServiceSegment, Role } from '../types/hub';
 interface MobileDeviceSimulatorProps {
   isOpen: boolean;
   onClose: () => void;
-  currentSegment: ServiceSegment;
+  currentSegment: ServiceSegment | null;
   nextSegment: ServiceSegment | null;
   localTimer: {
     remainingSeconds: number;
@@ -111,11 +111,11 @@ export const MobileDeviceSimulator: React.FC<MobileDeviceSimulatorProps> = ({
               <div className="bg-[#161626] p-3 rounded-2xl border border-white/5 space-y-1">
                 <span className="text-[10px] text-gray-400 uppercase font-bold">Next Up</span>
                 <h5 className="text-xs font-bold text-white flex items-center justify-between">
-                  <span>{currentSegment.title}</span>
+                  <span>{currentSegment?.title || 'Live Service Segment'}</span>
                   <ChevronRight className="w-3.5 h-3.5 text-purple-400" />
                 </h5>
                 <p className="text-[11px] text-gray-300">
-                  {currentSegment.assignedLead} • <span className="text-green-400 font-mono">Live</span>
+                  {currentSegment?.assignedLead || 'Standing By'} • <span className="text-green-400 font-mono">Live</span>
                 </p>
               </div>
 
@@ -247,7 +247,7 @@ export const MobileDeviceSimulator: React.FC<MobileDeviceSimulatorProps> = ({
                 <h5 className="text-2xl font-black font-timer text-amber-300 drop-shadow-[0_0_10px_rgba(245,158,11,0.4)]">
                   {localTimer.formattedTime}
                 </h5>
-                <p className="text-[11px] text-gray-400">{currentSegment.title}</p>
+                <p className="text-[11px] text-gray-400">{currentSegment?.title || 'Live Service Segment'}</p>
               </div>
 
               {/* Service Progress Card */}

@@ -325,10 +325,10 @@ export const AllClassesOverview: React.FC<AllClassesOverviewProps> = ({
                   <div className="bg-[#18182c] p-2 rounded-xl border border-white/5">
                     <div className="text-[9px] text-gray-400 uppercase font-bold">Incidents</div>
                     <div className="text-xs font-bold text-white mt-0.5 flex items-center gap-1">
-                      {hubData?.incidents && hubData.incidents.filter(i => i.status === 'open').length > 0 ? (
+                      {hubData?.incidents && hubData.incidents.filter(i => i?.status === 'open').length > 0 ? (
                         <>
                           <AlertTriangle className="w-3 h-3 text-amber-400" />
-                          <span className="text-amber-300 font-bold">{hubData.incidents.filter(i => i.status === 'open').length} Open</span>
+                          <span className="text-amber-300 font-bold">{hubData.incidents.filter(i => i?.status === 'open').length} Open</span>
                         </>
                       ) : (
                         <>

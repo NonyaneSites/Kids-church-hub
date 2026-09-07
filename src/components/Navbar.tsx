@@ -20,7 +20,8 @@ import {
   Check,
   LogOut,
   Megaphone,
-  Crown
+  Crown,
+  Database
 } from 'lucide-react';
 import { Role, ServiceSegment, AuthUser, ClassId, ClassInfo } from '../types/hub';
 import { CLASSES_CONFIG } from '../data/classHubsData';
@@ -36,7 +37,7 @@ interface NavbarProps {
   setActiveTab: (tab: string) => void;
   currentSegment?: ServiceSegment;
   currentUser: AuthUser;
-  onOpenAuthModal: (tab?: 'quick_switch' | 'login' | 'register' | 'manage' | 'permissions') => void;
+  onOpenAuthModal: (tab?: 'quick_switch' | 'login' | 'register' | 'manage' | 'permissions' | 'database') => void;
   onLogout?: () => void;
   selectedClassId: ClassId;
   onSelectClass: (classId: ClassId) => void;
@@ -485,6 +486,15 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span className="hidden sm:inline text-[11px]">
               {isMobileMode ? 'Phone Mode' : 'Phone View'}
             </span>
+          </button>
+
+          {/* Database / Supabase Sync Button */}
+          <button
+            onClick={() => onOpenAuthModal('database')}
+            title="Supabase Database & Cloud Accounts Sync"
+            className="p-2 rounded-2xl bg-[#161626] border border-white/10 hover:border-purple-500/50 hover:bg-purple-600/20 text-gray-400 hover:text-purple-300 transition-all flex items-center justify-center"
+          >
+            <Database className="w-3.5 h-3.5" />
           </button>
 
           {/* Authenticated User Pill Button */}

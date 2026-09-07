@@ -43,7 +43,7 @@ export default function App() {
     return false;
   });
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
-  const [authModalInitialTab, setAuthModalInitialTab] = useState<'quick_switch' | 'login' | 'register' | 'manage' | 'permissions'>('quick_switch');
+  const [authModalInitialTab, setAuthModalInitialTab] = useState<'quick_switch' | 'login' | 'register' | 'manage' | 'permissions' | 'database'>('quick_switch');
   const [isDirectorComposeOpen, setIsDirectorComposeOpen] = useState<boolean>(false);
 
   const {
@@ -116,6 +116,7 @@ export default function App() {
     deleteUserAccount,
     clearAllDefaultAccounts,
     resetDefaultAccounts,
+    syncAccountsWithCloud,
     promoteToClassAdmin,
     revokeClassAdmin,
     removeTeamMember,
@@ -160,7 +161,7 @@ export default function App() {
     else if (newRole === 'admin') setActiveTab('templates');
   };
 
-  const handleOpenAuthModal = (tab?: 'quick_switch' | 'login' | 'register' | 'manage' | 'permissions') => {
+  const handleOpenAuthModal = (tab?: 'quick_switch' | 'login' | 'register' | 'manage' | 'permissions' | 'database') => {
     setAuthModalInitialTab(tab || 'quick_switch');
     setIsAuthModalOpen(true);
   };
@@ -534,6 +535,7 @@ export default function App() {
         onResetDefaultAccounts={resetDefaultAccounts}
         onPromoteToClassAdmin={promoteToClassAdmin}
         onRevokeClassAdmin={revokeClassAdmin}
+        onSyncAccounts={syncAccountsWithCloud}
         initialTab={authModalInitialTab}
       />
 

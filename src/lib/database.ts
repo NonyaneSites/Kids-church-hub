@@ -1,5 +1,16 @@
 import { AuthUser } from '../types/hub';
-import { PRECONFIGURED_USERS, getSupabaseClient } from './supabase';
+import { 
+  PRECONFIGURED_USERS, 
+  getSupabaseClient,
+  isSupabaseConfigured,
+  getSupabaseConfig,
+  saveAccountToSupabase,
+  deleteAccountFromSupabase,
+  updateAccountAdminInSupabase,
+  updateAccountPinInSupabase,
+  fetchAccountsFromSupabase,
+  syncAllAccountsToSupabase,
+} from './supabase';
 
 const DB_NAME = 'CRCKidsChurchDB';
 const DB_VERSION = 1;
@@ -10,7 +21,7 @@ const LOCAL_STORAGE_ACCOUNTS_KEY = 'crc_kids_church_accounts_db_v6';
 const LOCAL_STORAGE_DELETED_KEY = 'crc_kids_church_deleted_accounts_v6';
 const LOCAL_STORAGE_CLEARED_FLAG = 'crc_kids_church_seed_cleared_v6';
 
-// Track deleted account IDs and emails permanently
+// Track deleted account IDs and emails permanently so they aren't accidentally revived
 function getPermanentlyDeletedKeys(): { ids: string[]; emails: string[] } {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_DELETED_KEY);
@@ -98,7 +109,6 @@ export async function syncToIndexedDB(accounts: AuthUser[]): Promise<void> {
       store.put(acc);
     }
   } catch (e) {
-    // Non-fatal, falls back to localStorage
     console.debug('IndexedDB sync notice:', e);
   }
 }
@@ -150,6 +160,7 @@ export function dbGetAccounts(): AuthUser[] {
 
 /**
  * Insert or update an account in the database.
+ * Persists to IndexedDB/localStorage AND syncs immediately to Supabase if configured.
  */
 export function dbSaveAccount(user: AuthUser): AuthUser[] {
   try {
@@ -160,25 +171,12 @@ export function dbSaveAccount(user: AuthUser): AuthUser[] {
     localStorage.setItem(LOCAL_STORAGE_ACCOUNTS_KEY, JSON.stringify(updated));
     syncToIndexedDB(updated);
 
-    // Also attempt remote Supabase sync if client is active
-    const supabase = getSupabaseClient();
-    if (supabase) {
-      supabase.from('staff_accounts').upsert({
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        role_title: user.roleTitle,
-        assigned_class_id: user.assignedClassId,
-        phone: user.phone,
-        is_class_admin: user.isClassAdmin,
-        pin: user.pin,
-        updated_at: new Date().toISOString(),
-      }).then(
-        () => console.debug('Saved account to Supabase:', user.email),
-        (err: any) => console.warn('Supabase account save error:', err)
-      );
-    }
+    // Sync to Supabase cloud database
+    saveAccountToSupabase(user).then((success) => {
+      if (success) {
+        console.debug('Saved account to Supabase:', user.email);
+      }
+    });
 
     return updated;
   } catch (e) {
@@ -189,7 +187,7 @@ export function dbSaveAccount(user: AuthUser): AuthUser[] {
 
 /**
  * Permanently delete an account from the database.
- * Adds ID and email to the permanent deletion registry so it is NEVER restored.
+ * Adds ID and email to the permanent deletion registry and deletes from Supabase.
  */
 export function dbDeleteAccount(userId: string): AuthUser[] {
   try {
@@ -206,14 +204,12 @@ export function dbDeleteAccount(userId: string): AuthUser[] {
     localStorage.setItem(LOCAL_STORAGE_ACCOUNTS_KEY, JSON.stringify(updated));
     syncToIndexedDB(updated);
 
-    // Also remove from remote Supabase if active
-    const supabase = getSupabaseClient();
-    if (supabase) {
-      supabase.from('staff_accounts').delete().eq('id', userId).then(
-        () => console.debug('Deleted account from Supabase:', userId),
-        (err: any) => console.warn('Supabase account delete error:', err)
-      );
-    }
+    // Remove from Supabase cloud database
+    deleteAccountFromSupabase(userId).then((success) => {
+      if (success) {
+        console.debug('Deleted account from Supabase:', userId);
+      }
+    });
 
     return updated;
   } catch (e) {
@@ -224,15 +220,14 @@ export function dbDeleteAccount(userId: string): AuthUser[] {
 
 /**
  * Remove ALL default demo seed accounts from the database.
- * Leaves only user-created accounts, or an empty list if none were created.
  */
 export function dbClearDefaultAccounts(): AuthUser[] {
   try {
     localStorage.setItem(LOCAL_STORAGE_CLEARED_FLAG, 'true');
 
-    // Register all preconfigured default accounts as permanently deleted
     PRECONFIGURED_USERS.forEach((pre) => {
       savePermanentlyDeletedKey(pre.id, pre.email);
+      deleteAccountFromSupabase(pre.id);
     });
 
     const list = dbGetAccounts();
@@ -262,6 +257,9 @@ export function dbResetDefaultAccounts(): AuthUser[] {
     localStorage.removeItem(LOCAL_STORAGE_DELETED_KEY);
     localStorage.setItem(LOCAL_STORAGE_ACCOUNTS_KEY, JSON.stringify(PRECONFIGURED_USERS));
     syncToIndexedDB(PRECONFIGURED_USERS);
+    
+    // Push seed accounts to Supabase
+    syncAllAccountsToSupabase(PRECONFIGURED_USERS);
     return PRECONFIGURED_USERS;
   } catch (e) {
     console.error('Failed to reset default accounts:', e);
@@ -270,26 +268,68 @@ export function dbResetDefaultAccounts(): AuthUser[] {
 }
 
 /**
- * Get the current database connection and storage status info.
+ * Bidirectional sync between local storage and Supabase
+ */
+export async function dbSyncWithSupabase(): Promise<{
+  synced: boolean;
+  accounts: AuthUser[];
+  source: 'supabase' | 'local';
+}> {
+  if (!isSupabaseConfigured()) {
+    return { synced: false, accounts: dbGetAccounts(), source: 'local' };
+  }
+
+  try {
+    const remoteAccounts = await fetchAccountsFromSupabase();
+    const localAccounts = dbGetAccounts();
+
+    if (remoteAccounts && remoteAccounts.length > 0) {
+      // Remote Supabase has accounts -> store locally as authoritative
+      const deleted = getPermanentlyDeletedKeys();
+      const sanitized = remoteAccounts.filter(
+        (a) => !deleted.ids.includes(a.id) && !deleted.emails.includes((a.email || '').toLowerCase())
+      );
+      localStorage.setItem(LOCAL_STORAGE_ACCOUNTS_KEY, JSON.stringify(sanitized));
+      syncToIndexedDB(sanitized);
+      return { synced: true, accounts: sanitized, source: 'supabase' };
+    } else if (remoteAccounts && remoteAccounts.length === 0 && localAccounts.length > 0) {
+      // Supabase table is empty, push existing local accounts to Supabase
+      await syncAllAccountsToSupabase(localAccounts);
+      return { synced: true, accounts: localAccounts, source: 'local' };
+    }
+
+    return { synced: false, accounts: localAccounts, source: 'local' };
+  } catch (e) {
+    console.warn('Supabase sync error:', e);
+    return { synced: false, accounts: dbGetAccounts(), source: 'local' };
+  }
+}
+
+/**
+ * Get current database connection and storage status info.
  */
 export function getDatabaseStatus(): {
-  type: 'IndexedDB' | 'LocalStorage' | 'Supabase';
+  type: 'Supabase' | 'IndexedDB' | 'LocalStorage';
   status: 'connected' | 'local_fallback';
   totalAccounts: number;
+  url?: string;
+  isCustom?: boolean;
 } {
   const accounts = dbGetAccounts();
-  const supabase = getSupabaseClient();
-  if (supabase) {
+  const config = getSupabaseConfig();
+  if (config.isConfigured) {
     return {
       type: 'Supabase',
       status: 'connected',
       totalAccounts: accounts.length,
+      url: config.url,
+      isCustom: config.isCustom,
     };
   }
   const hasIDB = typeof window !== 'undefined' && 'indexedDB' in window;
   return {
     type: hasIDB ? 'IndexedDB' : 'LocalStorage',
-    status: 'connected',
+    status: 'local_fallback',
     totalAccounts: accounts.length,
   };
 }
@@ -297,11 +337,21 @@ export function getDatabaseStatus(): {
 /**
  * Promote or revoke Class Admin privileges for an account in the database.
  */
-export function updateAccountAdminStatus(userId: string, isClassAdmin: boolean): AuthUser[] {
+export function updateAccountAdminStatus(
+  userId: string, 
+  isClassAdmin: boolean, 
+  promotedByName?: string
+): AuthUser[] {
   const list = dbGetAccounts();
-  const updated = list.map((u) => (u.id === userId ? { ...u, isClassAdmin } : u));
+  const updated = list.map((u) => (u.id === userId ? { 
+    ...u, 
+    isClassAdmin,
+    isAdminPromotedBy: isClassAdmin ? (promotedByName || 'Director') : undefined
+  } : u));
   localStorage.setItem(LOCAL_STORAGE_ACCOUNTS_KEY, JSON.stringify(updated));
   syncToIndexedDB(updated);
+
+  updateAccountAdminInSupabase(userId, isClassAdmin, promotedByName);
   return updated;
 }
 
@@ -313,6 +363,8 @@ export function updateAccountPin(userId: string, pin: string): AuthUser[] {
   const updated = list.map((u) => (u.id === userId ? { ...u, pin } : u));
   localStorage.setItem(LOCAL_STORAGE_ACCOUNTS_KEY, JSON.stringify(updated));
   syncToIndexedDB(updated);
+
+  updateAccountPinInSupabase(userId, pin);
   return updated;
 }
 

@@ -8,31 +8,472 @@ import {
   RealtimeIncidentEvent 
 } from '../types/hub';
 
-// Environment variable retrieval
-const supabaseUrl = (import.meta as any).env?.VITE_SUPABASE_URL || '';
-const supabaseAnonKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
+// Storage keys for custom client-side Supabase configuration
+const STORAGE_SUPABASE_URL_KEY = 'kch_custom_supabase_url';
+const STORAGE_SUPABASE_KEY_KEY = 'kch_custom_supabase_anon_key';
+
+/**
+ * Resolve active Supabase URL & Anon Key:
+ * 1. Environment variables (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY)
+ * 2. In-app localStorage credentials entered by user
+ */
+export function getSupabaseConfig(): {
+  url: string;
+  anonKey: string;
+  isConfigured: boolean;
+  isCustom: boolean;
+} {
+  const envUrl = ((import.meta as any).env?.VITE_SUPABASE_URL || '').trim();
+  const envKey = ((import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '').trim();
+
+  let customUrl = '';
+  let customKey = '';
+  if (typeof window !== 'undefined') {
+    try {
+      customUrl = (localStorage.getItem(STORAGE_SUPABASE_URL_KEY) || '').trim();
+      customKey = (localStorage.getItem(STORAGE_SUPABASE_KEY_KEY) || '').trim();
+    } catch (e) {}
+  }
+
+  const url = customUrl || envUrl;
+  const anonKey = customKey || envKey;
+  const isCustom = Boolean(customUrl && customKey);
+  const isConfigured = Boolean(url && anonKey && url.startsWith('http'));
+
+  return {
+    url,
+    anonKey,
+    isConfigured,
+    isCustom,
+  };
+}
+
+export function saveCustomSupabaseConfig(url: string, anonKey: string): boolean {
+  try {
+    const cleanUrl = url.trim();
+    const cleanKey = anonKey.trim();
+    if (!cleanUrl || !cleanKey) return false;
+
+    localStorage.setItem(STORAGE_SUPABASE_URL_KEY, cleanUrl);
+    localStorage.setItem(STORAGE_SUPABASE_KEY_KEY, cleanKey);
+    // Reset singleton instance so client recreates with new credentials
+    supabaseInstance = null;
+    return true;
+  } catch (e) {
+    console.warn('Failed to store custom Supabase config:', e);
+    return false;
+  }
+}
+
+export function clearCustomSupabaseConfig(): void {
+  try {
+    localStorage.removeItem(STORAGE_SUPABASE_URL_KEY);
+    localStorage.removeItem(STORAGE_SUPABASE_KEY_KEY);
+    supabaseInstance = null;
+  } catch (e) {}
+}
 
 let supabaseInstance: SupabaseClient | null = null;
+let currentClientKey = '';
 
 export function getSupabaseClient(): SupabaseClient | null {
-  if (!supabaseUrl || !supabaseAnonKey) {
+  const { url, anonKey, isConfigured } = getSupabaseConfig();
+  if (!isConfigured) {
     return null;
   }
-  if (!supabaseInstance) {
+
+  const clientKey = `${url}::${anonKey}`;
+  if (!supabaseInstance || currentClientKey !== clientKey) {
     try {
-      supabaseInstance = createClient(supabaseUrl, supabaseAnonKey, {
+      supabaseInstance = createClient(url, anonKey, {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+        },
         realtime: {
           params: {
             eventsPerSecond: 10,
           },
         },
       });
+      currentClientKey = clientKey;
     } catch (e) {
       console.warn('Failed to initialize Supabase client:', e);
       return null;
     }
   }
   return supabaseInstance;
+}
+
+export function isSupabaseConfigured(): boolean {
+  return getSupabaseConfig().isConfigured;
+}
+
+// -------------------------------------------------------------
+// POSTGRES TABLE SETUP SCRIPT FOR USER TO RUN IN SUPABASE SQL EDITOR
+// -------------------------------------------------------------
+export const SUPABASE_STAFF_ACCOUNTS_SQL = `-- ========================================================
+-- CRC KIDS CHURCH HUB - STAFF ACCOUNTS TABLE & POLICIES
+-- Copy and run this script in your Supabase Project -> SQL Editor
+-- ========================================================
+
+-- 1. Create staff_accounts table
+CREATE TABLE IF NOT EXISTS public.staff_accounts (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'volunteer',
+  role_title TEXT DEFAULT '',
+  assigned_class_id TEXT DEFAULT 'kb',
+  phone TEXT DEFAULT '',
+  whatsapp TEXT DEFAULT '',
+  avatar_color TEXT DEFAULT 'from-purple-600 to-indigo-600',
+  is_class_admin BOOLEAN DEFAULT FALSE,
+  pin TEXT DEFAULT '2026',
+  is_admin_promoted_by TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 2. Helpful indexes for fast querying
+CREATE INDEX IF NOT EXISTS idx_staff_accounts_email ON public.staff_accounts(email);
+CREATE INDEX IF NOT EXISTS idx_staff_accounts_role ON public.staff_accounts(role);
+CREATE INDEX IF NOT EXISTS idx_staff_accounts_class ON public.staff_accounts(assigned_class_id);
+
+-- 3. Enable Row Level Security (RLS)
+ALTER TABLE public.staff_accounts ENABLE ROW LEVEL SECURITY;
+
+-- 4. Create permissive policies for Church production hub operations
+DROP POLICY IF EXISTS "Allow all operations for staff_accounts" ON public.staff_accounts;
+CREATE POLICY "Allow all operations for staff_accounts"
+  ON public.staff_accounts
+  FOR ALL
+  TO anon, authenticated
+  USING (true)
+  WITH CHECK (true);
+
+-- 5. Enable Realtime updates
+ALTER PUBLICATION supabase_realtime ADD TABLE public.staff_accounts;
+`;
+
+// -------------------------------------------------------------
+// SUPABASE ACCOUNTS CLOUD CRUD METHODS
+// -------------------------------------------------------------
+
+export interface SupabaseRowAccount {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  role_title?: string | null;
+  assigned_class_id?: string | null;
+  phone?: string | null;
+  whatsapp?: string | null;
+  avatar_color?: string | null;
+  is_class_admin?: boolean | null;
+  pin?: string | null;
+  is_admin_promoted_by?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export function mapRowToAuthUser(row: SupabaseRowAccount): AuthUser {
+  return {
+    id: row.id,
+    name: row.name || 'Team Member',
+    email: (row.email || '').toLowerCase(),
+    role: (row.role as Role) || 'volunteer',
+    roleTitle: row.role_title || '',
+    assignedClassId: (row.assigned_class_id as any) || 'kb',
+    phone: row.phone || '',
+    whatsapp: row.whatsapp || '',
+    avatarColor: row.avatar_color || 'from-purple-600 to-indigo-600',
+    isClassAdmin: Boolean(row.is_class_admin),
+    pin: row.pin || '2026',
+    isAdminPromotedBy: row.is_admin_promoted_by || undefined,
+    isAuthenticated: true,
+  };
+}
+
+export function mapAuthUserToRow(user: AuthUser): SupabaseRowAccount {
+  return {
+    id: user.id,
+    name: user.name || 'Team Member',
+    email: (user.email || '').toLowerCase(),
+    role: user.role || 'volunteer',
+    role_title: user.roleTitle || '',
+    assigned_class_id: user.assignedClassId || 'kb',
+    phone: user.phone || '',
+    whatsapp: user.whatsapp || '',
+    avatar_color: user.avatarColor || 'from-purple-600 to-indigo-600',
+    is_class_admin: Boolean(user.isClassAdmin),
+    pin: user.pin || '2026',
+    is_admin_promoted_by: user.isAdminPromotedBy || null,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+/**
+ * Fetch all registered accounts from Supabase PostgreSQL
+ */
+export async function fetchAccountsFromSupabase(): Promise<AuthUser[] | null> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return null;
+
+  try {
+    const { data, error } = await supabase
+      .from('staff_accounts')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.warn('Supabase fetch accounts error:', error);
+      return null;
+    }
+
+    if (!data) return [];
+    return (data as SupabaseRowAccount[]).map(mapRowToAuthUser);
+  } catch (err) {
+    console.warn('Supabase fetch accounts exception:', err);
+    return null;
+  }
+}
+
+/**
+ * Save or update an account in Supabase
+ */
+export async function saveAccountToSupabase(user: AuthUser): Promise<boolean> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return false;
+
+  try {
+    const row = mapAuthUserToRow(user);
+    const { error } = await supabase
+      .from('staff_accounts')
+      .upsert(row, { onConflict: 'id' });
+
+    if (error) {
+      console.warn('Supabase save account error:', error);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('Supabase save account exception:', err);
+    return false;
+  }
+}
+
+/**
+ * Delete an account from Supabase
+ */
+export async function deleteAccountFromSupabase(userId: string): Promise<boolean> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return false;
+
+  try {
+    const { error } = await supabase
+      .from('staff_accounts')
+      .delete()
+      .eq('id', userId);
+
+    if (error) {
+      console.warn('Supabase delete account error:', error);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('Supabase delete account exception:', err);
+    return false;
+  }
+}
+
+/**
+ * Update Class Admin rights in Supabase
+ */
+export async function updateAccountAdminInSupabase(
+  userId: string,
+  isClassAdmin: boolean,
+  promotedBy?: string
+): Promise<boolean> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return false;
+
+  try {
+    const { error } = await supabase
+      .from('staff_accounts')
+      .update({
+        is_class_admin: isClassAdmin,
+        is_admin_promoted_by: isClassAdmin ? (promotedBy || 'Director') : null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId);
+
+    if (error) {
+      console.warn('Supabase update admin error:', error);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('Supabase update admin exception:', err);
+    return false;
+  }
+}
+
+/**
+ * Update PIN in Supabase
+ */
+export async function updateAccountPinInSupabase(userId: string, pin: string): Promise<boolean> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return false;
+
+  try {
+    const { error } = await supabase
+      .from('staff_accounts')
+      .update({
+        pin,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId);
+
+    if (error) {
+      console.warn('Supabase update pin error:', error);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('Supabase update pin exception:', err);
+    return false;
+  }
+}
+
+/**
+ * Sync all local accounts to Supabase (e.g. on initial connection)
+ */
+export async function syncAllAccountsToSupabase(
+  accounts: AuthUser[]
+): Promise<{ success: boolean; count: number; error?: string }> {
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    return { success: false, count: 0, error: 'Supabase client is not configured.' };
+  }
+
+  try {
+    if (accounts.length === 0) {
+      return { success: true, count: 0 };
+    }
+
+    const rows = accounts.map(mapAuthUserToRow);
+    const { error } = await supabase
+      .from('staff_accounts')
+      .upsert(rows, { onConflict: 'id' });
+
+    if (error) {
+      return { success: false, count: 0, error: error.message };
+    }
+
+    return { success: true, count: rows.length };
+  } catch (err: any) {
+    return { success: false, count: 0, error: err?.message || 'Unknown sync failure' };
+  }
+}
+
+/**
+ * Test Supabase connection and verify table status
+ */
+export async function testSupabaseConnection(): Promise<{
+  success: boolean;
+  message: string;
+  tableExists: boolean;
+  accountsCount: number;
+}> {
+  const supabase = getSupabaseClient();
+  const config = getSupabaseConfig();
+
+  if (!config.isConfigured || !supabase) {
+    return {
+      success: false,
+      message: 'Supabase URL or Anon Key is missing.',
+      tableExists: false,
+      accountsCount: 0,
+    };
+  }
+
+  try {
+    const { data, error, count } = await supabase
+      .from('staff_accounts')
+      .select('id', { count: 'exact' })
+      .limit(1);
+
+    if (error) {
+      // If table doesn't exist yet in Supabase (Postgres 42P01: relation does not exist)
+      if (error.code === '42P01' || error.message.includes('relation "public.staff_accounts" does not exist')) {
+        return {
+          success: true,
+          message: 'Connected to Supabase project! Note: The table "staff_accounts" does not exist yet. Run the SQL script below to create it.',
+          tableExists: false,
+          accountsCount: 0,
+        };
+      }
+      return {
+        success: false,
+        message: `Supabase Error (${error.code || 'query'}): ${error.message}`,
+        tableExists: false,
+        accountsCount: 0,
+      };
+    }
+
+    const total = count ?? (data ? data.length : 0);
+    return {
+      success: true,
+      message: `Successfully connected to Supabase! Table 'staff_accounts' is ready with ${total} account(s).`,
+      tableExists: true,
+      accountsCount: total,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: `Connection failed: ${err?.message || 'Network error'}`,
+      tableExists: false,
+      accountsCount: 0,
+    };
+  }
+}
+
+/**
+ * Realtime subscription to `staff_accounts` changes in Supabase
+ */
+export function subscribeToSupabaseAccounts(
+  onUpdate: (accounts: AuthUser[]) => void
+): () => void {
+  const supabase = getSupabaseClient();
+  if (!supabase) return () => {};
+
+  try {
+    const channel = supabase
+      .channel('realtime_staff_accounts_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'staff_accounts',
+        },
+        async () => {
+          const fresh = await fetchAccountsFromSupabase();
+          if (fresh) {
+            onUpdate(fresh);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  } catch (err) {
+    console.warn('Failed to subscribe to Supabase realtime accounts:', err);
+    return () => {};
+  }
 }
 
 // -------------------------------------------------------------
@@ -54,29 +495,12 @@ export const PRECONFIGURED_USERS: AuthUser[] = [
   },
 ];
 
-const LOCAL_USERS_STORAGE_KEY = 'kids_church_registered_users_v6';
-const SEED_CLEARED_FLAG_KEY = 'kids_church_seed_users_cleared_v6';
-const DELETED_USERS_STORAGE_KEY = 'kids_church_deleted_users_v6';
-
-
-function getDeletedUserIds(): string[] {
-  try {
-    const raw = localStorage.getItem(DELETED_USERS_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch (e) {
-    return [];
-  }
-}
-
-
-
 import {
   dbGetAccounts,
   dbSaveAccount,
   dbDeleteAccount,
   dbClearDefaultAccounts,
   dbResetDefaultAccounts,
-  syncToIndexedDB,
 } from './database';
 
 export function getStoredAccountsList(): AuthUser[] {
@@ -99,50 +523,8 @@ export function resetToSeedAccounts(): AuthUser[] {
   return dbResetDefaultAccounts();
 }
 
-export function updateAccountAdminStatus(
-  userId: string,
-  isClassAdmin: boolean,
-  promotedByName: string
-): AuthUser[] {
-  try {
-    const list = getStoredAccountsList();
-    const updated = list.map((user) => {
-      if (user.id === userId) {
-        return {
-          ...user,
-          isClassAdmin,
-          isAdminPromotedBy: isClassAdmin ? promotedByName : undefined,
-        };
-      }
-      return user;
-    });
-    localStorage.setItem(LOCAL_USERS_STORAGE_KEY, JSON.stringify(updated));
-    return updated;
-  } catch (e) {
-    console.error('Failed to update account admin status:', e);
-    return getStoredAccountsList();
-  }
-}
-
-export function updateAccountPin(userId: string, pin: string): AuthUser[] {
-  try {
-    const list = getStoredAccountsList();
-    const updated = list.map((user) => {
-      if (user.id === userId) {
-        return { ...user, pin };
-      }
-      return user;
-    });
-    localStorage.setItem(LOCAL_USERS_STORAGE_KEY, JSON.stringify(updated));
-    return updated;
-  } catch (e) {
-    console.error('Failed to update pin:', e);
-    return getStoredAccountsList();
-  }
-}
-
 // -------------------------------------------------------------
-// DEFAULT SERVICE TEMPLATES (POSTGRES `service_templates` TABLE)
+// DEFAULT SERVICE TEMPLATES
 // -------------------------------------------------------------
 export const DEFAULT_SERVICE_TEMPLATES: ServiceTemplate[] = [
   {
@@ -385,7 +767,6 @@ export function getStoredAuthUser(): AuthUser {
   } catch (e) {
     console.warn('Error reading stored auth user:', e);
   }
-  // Unauthenticated by default so user is required to sign in or use guest account
   return {
     id: 'unauthenticated',
     email: '',
@@ -407,7 +788,7 @@ export function saveStoredAuthUser(user: AuthUser): void {
 }
 
 // -------------------------------------------------------------
-// SERVICE TEMPLATES STORAGE HELPERS (`service_templates` Postgres table)
+// SERVICE TEMPLATES STORAGE HELPERS
 // -------------------------------------------------------------
 export function getStoredTemplates(): ServiceTemplate[] {
   try {
@@ -432,9 +813,13 @@ export function saveStoredTemplates(templates: ServiceTemplate[]): void {
   }
 }
 
-// Re-export persistent database accounts engine
-// Re-export database status helper
-export { getDatabaseStatus } from './database';
+// Re-export persistent database accounts engine & status helper
+export { 
+  getDatabaseStatus, 
+  updateAccountAdminStatus, 
+  updateAccountPin,
+  dbSyncWithSupabase,
+} from './database';
 
 export function broadcastIncidentRealtime(event: RealtimeIncidentEvent): void {
   const supabase = getSupabaseClient();

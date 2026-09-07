@@ -17,7 +17,7 @@ import { ServiceSegment } from '../types/hub';
 interface HolySpiritModalProps {
   isOpen: boolean;
   onClose: () => void;
-  currentSegment: ServiceSegment;
+  currentSegment: ServiceSegment | null;
   onApplyOverride: (options: {
     action: 'extend' | 'shorten' | 'skip';
     adjustmentMinutes: number;
@@ -101,8 +101,8 @@ export const HolySpiritModal: React.FC<HolySpiritModalProps> = ({
             <div>
               <span className="text-[10px] uppercase font-bold text-purple-400 tracking-wider">Current Segment</span>
               <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2 mt-0.5">
-                <span>{currentSegment.title}</span>
-                <span className="text-xs font-normal text-gray-400">({currentSegment.assignedLead})</span>
+                <span>{currentSegment?.title || 'Live Service Segment'}</span>
+                <span className="text-xs font-normal text-gray-400">({currentSegment?.assignedLead || 'Leader'})</span>
               </h3>
             </div>
             <div className="text-right">

@@ -28,7 +28,15 @@ import {
   Eye,
   EyeOff,
   ChevronRight,
-  Database
+  Database,
+  Copy,
+  RefreshCw,
+  Server,
+  Wifi,
+  WifiOff,
+  ExternalLink,
+  Code,
+  CheckCircle
 } from 'lucide-react';
 import { Role, AuthUser, ClassId, ClassInfo } from '../types/hub';
 import { CLASSES_CONFIG } from '../data/classHubsData';
@@ -38,7 +46,16 @@ import {
   getSouthAfricaWhatsAppLink, 
   normalizeToE164ZA 
 } from '../utils/southAfricaPhone';
-import { clearAllSeedAccounts, resetToSeedAccounts } from '../lib/supabase';
+import { 
+  getSupabaseConfig, 
+  saveCustomSupabaseConfig, 
+  clearCustomSupabaseConfig, 
+  testSupabaseConnection, 
+  syncAllAccountsToSupabase, 
+  SUPABASE_STAFF_ACCOUNTS_SQL,
+  clearAllSeedAccounts, 
+  resetToSeedAccounts 
+} from '../lib/supabase';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -54,7 +71,8 @@ interface AuthModalProps {
   onResetDefaultAccounts?: () => void;
   onPromoteToClassAdmin?: (userId: string) => void;
   onRevokeClassAdmin?: (userId: string) => void;
-  initialTab?: 'quick_switch' | 'login' | 'register' | 'manage' | 'permissions';
+  onSyncAccounts?: () => Promise<any>;
+  initialTab?: 'quick_switch' | 'login' | 'register' | 'manage' | 'permissions' | 'database';
 }
 
 const AVATAR_COLORS = [
@@ -87,7 +105,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const isClassAdmin = Boolean(currentUser?.isClassAdmin) || (currentUser?.role === 'admin' && currentUser?.assignedClassId !== 'all') || (currentUser?.role as string) === 'class-admin';
   const canCreateAccounts = isDirector || isClassAdmin;
 
-  const [activeTab, setActiveTab] = useState<'quick_switch' | 'login' | 'register' | 'manage' | 'permissions'>(
+  const [activeTab, setActiveTab] = useState<'quick_switch' | 'login' | 'register' | 'manage' | 'permissions' | 'database'>(
     initialTab === 'register' && !canCreateAccounts ? 'quick_switch' : initialTab
   );
   
@@ -96,6 +114,101 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [isConfirmingClearDefaults, setIsConfirmingClearDefaults] = useState(false);
   const [isConfirmingResetDefaults, setIsConfirmingResetDefaults] = useState(false);
   const [userToToggleAdmin, setUserToToggleAdmin] = useState<AuthUser | null>(null);
+
+  // Supabase Cloud Configuration & Sync State
+  const [supabaseConfig, setSupabaseConfig] = useState(() => getSupabaseConfig());
+  const [sbUrlInput, setSbUrlInput] = useState(() => getSupabaseConfig().url);
+  const [sbKeyInput, setSbKeyInput] = useState(() => getSupabaseConfig().anonKey);
+  const [isTestingSb, setIsTestingSb] = useState(false);
+  const [testResult, setTestResult] = useState<{
+    success: boolean;
+    message: string;
+    tableExists?: boolean;
+    accountsCount?: number;
+  } | null>(null);
+  const [isSyncingSb, setIsSyncingSb] = useState(false);
+  const [copiedSql, setCopiedSql] = useState(false);
+
+  const handleSaveSupabaseConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!sbUrlInput.trim() || !sbKeyInput.trim()) {
+      setErrorMsg('Please enter both your Supabase Project URL and Anon API Key.');
+      return;
+    }
+    setErrorMsg('');
+    const success = saveCustomSupabaseConfig(sbUrlInput.trim(), sbKeyInput.trim());
+    if (success) {
+      setSupabaseConfig(getSupabaseConfig());
+      setSuccessMsg('Supabase credentials saved! Testing connection...');
+      await handleTestSupabaseConnection();
+    } else {
+      setErrorMsg('Failed to save Supabase credentials.');
+    }
+  };
+
+  const handleClearSupabaseConfig = () => {
+    clearCustomSupabaseConfig();
+    setSupabaseConfig(getSupabaseConfig());
+    setSbUrlInput('');
+    setSbKeyInput('');
+    setTestResult(null);
+    setSuccessMsg('Supabase credentials disconnected. Accounts are stored in local storage.');
+  };
+
+  const handleTestSupabaseConnection = async () => {
+    setIsTestingSb(true);
+    setTestResult(null);
+    try {
+      const res = await testSupabaseConnection();
+      setTestResult(res);
+      if (res.success && res.tableExists) {
+        setSuccessMsg(res.message);
+      } else if (res.success && !res.tableExists) {
+        setErrorMsg('Supabase reached, but table "staff_accounts" is missing. Run the SQL script below!');
+      } else {
+        setErrorMsg(res.message);
+      }
+    } catch (e: any) {
+      setTestResult({
+        success: false,
+        message: e?.message || 'Connection test failed',
+        tableExists: false,
+        accountsCount: 0,
+      });
+      setErrorMsg('Connection test failed: ' + (e?.message || 'Unknown error'));
+    } finally {
+      setIsTestingSb(false);
+    }
+  };
+
+  const handleSyncToSupabase = async () => {
+    setIsSyncingSb(true);
+    setErrorMsg('');
+    try {
+      const res = await syncAllAccountsToSupabase(registeredAccounts);
+      if (res.success) {
+        setSuccessMsg(`Successfully synced ${res.count} account(s) to Supabase cloud!`);
+        await handleTestSupabaseConnection();
+      } else {
+        setErrorMsg(`Sync failed: ${res.error || 'Check that staff_accounts table exists in Supabase.'}`);
+      }
+    } catch (e: any) {
+      setErrorMsg('Sync error: ' + (e?.message || 'Unknown error'));
+    } finally {
+      setIsSyncingSb(false);
+    }
+  };
+
+  const handleCopySql = () => {
+    try {
+      navigator.clipboard.writeText(SUPABASE_STAFF_ACCOUNTS_SQL);
+      setCopiedSql(true);
+      setSuccessMsg('Supabase SQL table schema copied to clipboard!');
+      setTimeout(() => setCopiedSql(false), 2500);
+    } catch (e) {
+      setErrorMsg('Failed to copy to clipboard.');
+    }
+  };
 
   // Custom Login State
   const [emailInput, setEmailInput] = useState('');
@@ -438,6 +551,26 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           >
             <Shield className="w-3.5 h-3.5" />
             <span>Hierarchy Rules</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setActiveTab('database');
+              setPendingSwitchUser(null);
+              setErrorMsg('');
+              setSupabaseConfig(getSupabaseConfig());
+            }}
+            className={`py-1.5 px-3 rounded-xl transition-all flex items-center gap-1.5 whitespace-nowrap ${
+              activeTab === 'database' ? 'bg-purple-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'
+            }`}
+          >
+            <Database className="w-3.5 h-3.5" />
+            <span>Supabase DB</span>
+            {supabaseConfig.isConfigured ? (
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            ) : (
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400/80" />
+            )}
           </button>
         </div>
 
@@ -1216,6 +1349,180 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <p className="text-gray-300 text-[11px] leading-relaxed">
                   Operates hardware/HDMI pre-service checklists, worship tracks, presentation slides, SFX soundboard, and logs real-time service incidents for post-service review.
                 </p>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 6: SUPABASE DATABASE CLOUD SYNC */}
+          {activeTab === 'database' && (
+            <div className="space-y-4">
+              {/* Connection Status Card */}
+              <div className={`p-4 rounded-2xl border ${
+                supabaseConfig.isConfigured 
+                  ? 'bg-emerald-950/20 border-emerald-500/30' 
+                  : 'bg-amber-950/20 border-amber-500/30'
+              }`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+                      supabaseConfig.isConfigured 
+                        ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-500/30' 
+                        : 'bg-amber-600/20 text-amber-400 border border-amber-500/30'
+                    }`}>
+                      {supabaseConfig.isConfigured ? <Wifi className="w-5 h-5" /> : <WifiOff className="w-5 h-5" />}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold text-white">
+                          {supabaseConfig.isConfigured ? 'Supabase Database Active' : 'Local Storage Mode (Offline-Ready)'}
+                        </span>
+                        <span className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full ${
+                          supabaseConfig.isConfigured
+                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                            : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                        }`}>
+                          {supabaseConfig.isConfigured ? 'Cloud Connected' : 'Local Fallback'}
+                        </span>
+                      </div>
+                      <p className="text-gray-300 text-xs mt-0.5">
+                        {supabaseConfig.isConfigured ? (
+                          <>Connected to: <span className="font-mono text-purple-300">{supabaseConfig.url}</span> ({supabaseConfig.isCustom ? 'In-App Credentials' : 'Environment Variable'})</>
+                        ) : (
+                          'Accounts are saved securely in browser IndexedDB & LocalStorage. Connect your Supabase project below for cloud multi-device sync.'
+                        )}
+                      </p>
+                    </div>
+                  </div>
+
+                  {supabaseConfig.isConfigured && (
+                    <button
+                      onClick={handleClearSupabaseConfig}
+                      className="px-2.5 py-1 text-[11px] rounded-lg bg-red-950/40 border border-red-500/30 text-red-300 hover:bg-red-900/40 transition-colors shrink-0 font-semibold"
+                    >
+                      Disconnect
+                    </button>
+                  )}
+                </div>
+
+                {/* Quick Cloud Actions */}
+                <div className="mt-3.5 pt-3 border-t border-white/5 flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={handleTestSupabaseConnection}
+                    disabled={isTestingSb || !supabaseConfig.isConfigured}
+                    className="px-3 py-1.5 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/40 text-purple-200 text-xs font-semibold flex items-center gap-1.5 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isTestingSb ? 'animate-spin' : ''}`} />
+                    <span>{isTestingSb ? 'Testing...' : 'Test Connection'}</span>
+                  </button>
+
+                  <button
+                    onClick={handleSyncToSupabase}
+                    disabled={isSyncingSb || !supabaseConfig.isConfigured}
+                    className="px-3 py-1.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-200 text-xs font-semibold flex items-center gap-1.5 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <Database className={`w-3.5 h-3.5 ${isSyncingSb ? 'animate-pulse' : ''}`} />
+                    <span>{isSyncingSb ? 'Syncing...' : `Sync ${registeredAccounts.length} Local Accounts to Supabase`}</span>
+                  </button>
+
+                  <span className="text-[11px] text-gray-400 ml-auto font-mono">
+                    Local Accounts: <strong className="text-white">{registeredAccounts.length}</strong>
+                  </span>
+                </div>
+
+                {testResult && (
+                  <div className={`mt-3 p-2.5 rounded-xl text-xs font-mono border ${
+                    testResult.success 
+                      ? 'bg-emerald-950/30 border-emerald-500/40 text-emerald-200' 
+                      : 'bg-red-950/30 border-red-500/40 text-red-200'
+                  }`}>
+                    {testResult.message}
+                  </div>
+                )}
+              </div>
+
+              {/* Supabase Configuration Inputs */}
+              <div className="p-4 bg-black/40 border border-white/5 rounded-2xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                    <Server className="w-4 h-4 text-purple-400" />
+                    Supabase Project Credentials
+                  </span>
+                  <span className="text-[10px] text-gray-400">
+                    Find these in Supabase Dashboard → Settings → API
+                  </span>
+                </div>
+
+                <form onSubmit={handleSaveSupabaseConfig} className="space-y-3">
+                  <div>
+                    <label className="block text-[11px] text-gray-400 font-semibold mb-1">
+                      Project URL (VITE_SUPABASE_URL)
+                    </label>
+                    <input
+                      type="url"
+                      placeholder="https://xyzprojectid.supabase.co"
+                      value={sbUrlInput}
+                      onChange={(e) => setSbUrlInput(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl bg-black/50 border border-white/10 text-white text-xs font-mono focus:border-purple-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] text-gray-400 font-semibold mb-1">
+                      Anon Public API Key (VITE_SUPABASE_ANON_KEY)
+                    </label>
+                    <input
+                      type="password"
+                      placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                      value={sbKeyInput}
+                      onChange={(e) => setSbKeyInput(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl bg-black/50 border border-white/10 text-white text-xs font-mono focus:border-purple-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1">
+                    <p className="text-[10px] text-gray-400">
+                      Credentials are stored securely in your app workspace.
+                    </p>
+                    <button
+                      type="submit"
+                      className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-md shadow-purple-600/30 cursor-pointer"
+                    >
+                      Save & Connect
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              {/* SQL Setup Instructions & Script */}
+              <div className="p-4 bg-black/40 border border-white/5 rounded-2xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                    <Code className="w-4 h-4 text-emerald-400" />
+                    Supabase PostgreSQL Table Setup
+                  </span>
+                  <button
+                    onClick={handleCopySql}
+                    className="px-2.5 py-1 text-xs rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 font-bold flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
+                  >
+                    {copiedSql ? <CheckCircle className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedSql ? 'Copied!' : 'Copy SQL Script'}</span>
+                  </button>
+                </div>
+
+                <div className="p-3 bg-purple-950/20 border border-purple-500/20 rounded-xl space-y-1 text-xs text-gray-300">
+                  <p className="font-semibold text-purple-300">How to set up your Supabase database in 3 steps:</p>
+                  <ol className="list-decimal list-inside text-[11px] space-y-0.5 text-gray-300">
+                    <li>Open your Supabase Project Dashboard and click <strong>SQL Editor</strong> in the left menu.</li>
+                    <li>Click <strong>+ New Query</strong>, paste the script below, and click <strong>Run</strong>.</li>
+                    <li>Enter your <strong>Project URL</strong> and <strong>Anon Key</strong> above and click <strong>Save & Connect</strong>!</li>
+                  </ol>
+                </div>
+
+                <div className="relative">
+                  <pre className="p-3 rounded-xl bg-black/60 border border-white/10 text-purple-200 font-mono text-[10px] leading-relaxed overflow-x-auto max-h-48 whitespace-pre">
+                    {SUPABASE_STAFF_ACCOUNTS_SQL}
+                  </pre>
+                </div>
               </div>
             </div>
           )}
