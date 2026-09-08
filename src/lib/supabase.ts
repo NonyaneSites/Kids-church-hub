@@ -436,61 +436,101 @@ export interface SupabaseFetchDetailedResult<T> {
 }
 
 /**
- * Fetch all registered accounts with full status, error codes, and details
+ * Fetch all registered accounts with full status, error codes, and details.
+ * Features dual-strategy: First queries via Supabase client SDK; if that encounters
+ * any error or timeout, falls back directly to browser native REST fetch.
  */
 export async function fetchAccountsDetailedFromSupabase(): Promise<SupabaseFetchDetailedResult<AuthUser[]>> {
+  const { url, anonKey } = getSupabaseConfig();
   const supabase = getSupabaseClient();
-  if (!supabase) {
-    return {
-      success: false,
-      data: null,
-      error: {
-        message: 'Church database client not initialized or offline.',
-        code: 'CLIENT_UNAVAILABLE',
-        status: 0,
-      },
-    };
+
+  if (supabase) {
+    try {
+      const { data, error, status, statusText } = await supabase
+        .from('staff_accounts')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (!error && Array.isArray(data)) {
+        const mapped = ((data as SupabaseRowAccount[]) || []).map(mapRowToAuthUser);
+        return {
+          success: true,
+          data: mapped,
+          error: null,
+        };
+      } else {
+        console.warn('[Supabase SDK staff_accounts query returned error, falling back to direct REST]:', { status, statusText, error });
+      }
+    } catch (sdkErr: any) {
+      console.warn('[Supabase SDK exception, falling back to direct REST]:', sdkErr);
+    }
   }
 
-  try {
-    const { data, error, status, statusText } = await supabase
-      .from('staff_accounts')
-      .select('*')
-      .order('created_at', { ascending: false });
+  // 2. Resilient Direct REST fetch fallback (bypasses SDK channel state & WebSockets)
+  if (url && anonKey) {
+    try {
+      const restEndpoint = `${sanitizeSupabaseUrl(url)}/rest/v1/staff_accounts?select=*&order=created_at.desc`;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
 
-    if (error) {
-      console.warn('[Supabase staff_accounts SELECT error]:', { status, statusText, error });
+      const res = await fetch(restEndpoint, {
+        headers: {
+          apikey: anonKey,
+          Authorization: `Bearer ${anonKey}`,
+          Accept: 'application/json',
+        },
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (res.ok) {
+        const rows = await res.json();
+        if (Array.isArray(rows)) {
+          const mapped = (rows as SupabaseRowAccount[]).map(mapRowToAuthUser);
+          return {
+            success: true,
+            data: mapped,
+            error: null,
+          };
+        }
+      } else {
+        const errText = await res.text().catch(() => '');
+        console.warn('[Direct REST fetch failed]:', res.status, errText);
+        return {
+          success: false,
+          data: null,
+          error: {
+            message: `Database responded with status ${res.status}: ${res.statusText || 'Unable to load accounts'}`,
+            code: String(res.status),
+            status: res.status,
+          },
+        };
+      }
+    } catch (directErr: any) {
+      console.warn('[Direct REST exception]:', directErr);
       return {
         success: false,
         data: null,
         error: {
-          message: error.message || 'Error querying church database.',
-          code: error.code || String(status),
-          status,
-          details: error.details,
-          hint: error.hint,
+          message: directErr?.name === 'AbortError' 
+            ? 'Connection timed out. Check your internet connection.' 
+            : (directErr?.message || 'Network connection failed (offline or unreachable).'),
+          code: 'NETWORK_DISCONNECTED',
+          status: 0,
         },
       };
     }
-
-    const mapped = ((data as SupabaseRowAccount[]) || []).map(mapRowToAuthUser);
-    return {
-      success: true,
-      data: mapped,
-      error: null,
-    };
-  } catch (err: any) {
-    console.warn('[Supabase staff_accounts SELECT network exception]:', err);
-    return {
-      success: false,
-      data: null,
-      error: {
-        message: err?.message || 'Network connection failed (offline or unreachable).',
-        code: 'NETWORK_DISCONNECTED',
-        status: 0,
-      },
-    };
   }
+
+  return {
+    success: false,
+    data: null,
+    error: {
+      message: 'Church database credentials are not configured.',
+      code: 'CLIENT_UNAVAILABLE',
+      status: 0,
+    },
+  };
 }
 
 /**

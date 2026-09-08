@@ -22,7 +22,8 @@ import {
   Copy,
   Eye,
   EyeOff,
-  RefreshCw
+  RefreshCw,
+  RotateCw
 } from 'lucide-react';
 import { AuthUser, Role, ClassId } from '../types/hub';
 import { CLASSES_CONFIG } from '../data/classHubsData';
@@ -76,6 +77,26 @@ export const SignInGate: React.FC<SignInGateProps> = ({
   // Feedback Messages
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [isRetrying, setIsRetrying] = useState(false);
+
+  const handleManualRetry = async () => {
+    setIsRetrying(true);
+    try {
+      if (onRefreshAccounts) {
+        await onRefreshAccounts();
+      }
+    } finally {
+      setTimeout(() => setIsRetrying(false), 600);
+    }
+  };
+
+  const handleHardReload = () => {
+    try {
+      localStorage.removeItem('kch_custom_supabase_url');
+      localStorage.removeItem('kch_custom_supabase_anon_key');
+    } catch (e) {}
+    window.location.href = window.location.pathname + '?v=' + Date.now();
+  };
 
   // Role filter in account list
   const [filterRole, setFilterRole] = useState<'all' | 'director' | 'admin' | 'tech' | 'presenter' | 'comms'>('all');
@@ -624,31 +645,43 @@ export const SignInGate: React.FC<SignInGateProps> = ({
                       <div className="text-[11px] text-gray-400">Loading verified staff accounts from Supabase cloud</div>
                     </div>
                   ) : syncError && registeredAccounts.length === 0 ? (
-                    <div className="text-center py-8 px-4 bg-red-950/20 rounded-2xl border border-red-500/30 space-y-3">
+                    <div className="text-center py-7 px-4 bg-red-950/25 rounded-2xl border border-red-500/30 space-y-3">
                       <AlertCircle className="w-8 h-8 text-red-400 mx-auto" />
                       <div className="text-xs font-bold text-white">Could Not Connect to Church Database</div>
-                      <p className="text-[11px] text-red-300/80 max-w-sm mx-auto">
+                      <p className="text-[11px] text-red-300/90 max-w-sm mx-auto leading-relaxed">
                         {syncError}
                       </p>
-                      <div className="flex items-center justify-center gap-2 pt-1">
+                      <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
                         {onRefreshAccounts && (
                           <button
                             type="button"
-                            onClick={onRefreshAccounts}
-                            disabled={isSyncing}
-                            className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer"
+                            onClick={handleManualRetry}
+                            disabled={isSyncing || isRetrying}
+                            className="px-4 py-2.5 bg-purple-600 hover:bg-purple-500 active:scale-95 text-white font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-lg shadow-purple-900/30 disabled:opacity-60"
                           >
-                            <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-                            <span>Retry Connection</span>
+                            <RefreshCw className={`w-3.5 h-3.5 ${isSyncing || isRetrying ? 'animate-spin' : ''}`} />
+                            <span>{isSyncing || isRetrying ? 'Connecting...' : 'Retry Connection'}</span>
                           </button>
                         )}
                         <button
                           type="button"
+                          onClick={handleHardReload}
+                          title="Purges any cached browser scripts and forces a fresh reload"
+                          className="px-3.5 py-2.5 bg-white/10 hover:bg-white/20 active:scale-95 text-white font-medium text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer border border-white/10"
+                        >
+                          <RotateCw className="w-3.5 h-3.5" />
+                          <span>Reload App</span>
+                        </button>
+                        <button
+                          type="button"
                           onClick={handleGuestSignIn}
-                          className="px-3 py-2 bg-white/10 hover:bg-white/20 text-gray-200 font-bold text-xs rounded-xl transition-all cursor-pointer"
+                          className="px-3.5 py-2.5 bg-emerald-600/80 hover:bg-emerald-500 active:scale-95 text-white font-bold text-xs rounded-xl transition-all cursor-pointer shadow-lg shadow-emerald-950/40"
                         >
                           Fast Pass
                         </button>
+                      </div>
+                      <div className="text-[10px] text-gray-400 pt-1">
+                        Target: <span className="font-mono text-purple-300">CRC Kids Supabase Cloud</span>
                       </div>
                     </div>
                   ) : filteredAccounts.length === 0 ? (

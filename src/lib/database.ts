@@ -4,6 +4,7 @@ import {
   getSupabaseClient,
   isSupabaseConfigured,
   getSupabaseConfig,
+  clearCustomSupabaseConfig,
   saveAccountToSupabase,
   deleteAccountFromSupabase,
   updateAccountAdminInSupabase,
@@ -270,13 +271,8 @@ export interface DbSyncResult {
  */
 export async function dbSyncWithSupabase(): Promise<DbSyncResult> {
   if (!isSupabaseConfigured()) {
-    return {
-      synced: false,
-      accounts: dbGetAccounts(),
-      source: 'local',
-      error: { message: 'Church database credentials are not configured.', code: 'NOT_CONFIGURED' },
-      isEmptyConfirmed: false,
-    };
+    // Attempt automatic self-healing by purging corrupted local keys
+    clearCustomSupabaseConfig();
   }
 
   try {
@@ -303,7 +299,7 @@ export async function dbSyncWithSupabase(): Promise<DbSyncResult> {
       synced: false,
       accounts: localAccounts,
       source: 'local',
-      error: detailed.error || { message: 'Could not fetch accounts from church database.' },
+      error: detailed.error || { message: 'Could not fetch accounts from church database. Tap to retry.' },
       isEmptyConfirmed: false,
     };
   } catch (e: any) {
