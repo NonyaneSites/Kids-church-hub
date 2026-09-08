@@ -518,7 +518,7 @@ export const TechConsole: React.FC<TechConsoleProps> = ({
       {/* Add Checklist Item Modal (Class Admin) */}
       {showAddChecklistModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
-          <div className="w-full max-w-md bg-[#161626] border border-white/10 rounded-2xl p-6 space-y-4 shadow-2xl">
+          <div className="w-full max-w-md bg-[#161626] border border-white/10 rounded-2xl p-5 sm:p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-2 border-b border-white/5">
               <h3 className="text-base font-bold text-white flex items-center gap-2">
                 <CheckCircle2 className="w-5 h-5 text-blue-400" />
@@ -526,7 +526,7 @@ export const TechConsole: React.FC<TechConsoleProps> = ({
               </h3>
               <button
                 onClick={() => setShowAddChecklistModal(false)}
-                className="p-1.5 text-gray-400 hover:text-white rounded-lg"
+                className="p-2 text-gray-400 hover:text-white rounded-lg min-h-[44px] min-w-[44px] flex items-center justify-center"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -541,7 +541,7 @@ export const TechConsole: React.FC<TechConsoleProps> = ({
                   value={newChecklistLabel}
                   onChange={(e) => setNewChecklistLabel(e.target.value)}
                   placeholder="e.g. Wireless Mic 1 Battery Check, Stage Projector HDMI sync"
-                  className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-blue-500"
+                  className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-blue-500 min-h-[44px]"
                 />
               </div>
 
@@ -550,7 +550,7 @@ export const TechConsole: React.FC<TechConsoleProps> = ({
                 <select
                   value={newChecklistCategory}
                   onChange={(e) => setNewChecklistCategory(e.target.value as any)}
-                  className="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                  className="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-xs text-white focus:outline-none focus:border-blue-500 min-h-[44px]"
                 >
                   <option value="hardware">Hardware & Inputs</option>
                   <option value="audio">Audio & Microphones</option>
@@ -564,13 +564,13 @@ export const TechConsole: React.FC<TechConsoleProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowAddChecklistModal(false)}
-                  className="px-4 py-2 rounded-xl text-gray-400 hover:text-white"
+                  className="px-4 py-2.5 rounded-xl text-gray-400 hover:text-white min-h-[44px]"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold shadow-md"
+                  className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold shadow-md min-h-[44px]"
                 >
                   Add Item
                 </button>
@@ -583,7 +583,7 @@ export const TechConsole: React.FC<TechConsoleProps> = ({
       {/* Report Incident Modal */}
       {showIncidentModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
-          <div className="bg-[#161626] border border-white/10 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4">
+          <div className="bg-[#161626] border border-white/10 rounded-3xl p-5 sm:p-6 max-w-md w-full shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-white/5">
               <div className="flex items-center gap-2">
                 <AlertTriangle className="w-5 h-5 text-amber-400" />
@@ -591,7 +591,7 @@ export const TechConsole: React.FC<TechConsoleProps> = ({
               </div>
               <button
                 onClick={() => setShowIncidentModal(false)}
-                className="text-gray-400 hover:text-white"
+                className="p-2 text-gray-400 hover:text-white rounded-lg min-h-[44px] min-w-[44px] flex items-center justify-center"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -625,7 +625,7 @@ export const TechConsole: React.FC<TechConsoleProps> = ({
                       key={sev.level}
                       type="button"
                       onClick={() => setIncidentSeverity(sev.level as any)}
-                      className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all ${
+                      className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all min-h-[44px] ${
                         incidentSeverity === sev.level
                           ? `${sev.color} ring-2 ring-blue-400`
                           : 'border-white/5 bg-white/5 text-gray-400 hover:text-white'
@@ -641,7 +641,7 @@ export const TechConsole: React.FC<TechConsoleProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowIncidentModal(false)}
-                  className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-xs font-bold text-gray-300 transition-all"
+                  className="px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-xs font-bold text-gray-300 transition-all min-h-[44px]"
                 >
                   Cancel
                 </button>
@@ -654,7 +654,7 @@ export const TechConsole: React.FC<TechConsoleProps> = ({
                       setShowIncidentModal(false);
                     }
                   }}
-                  className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-xs font-bold text-white shadow-lg transition-all"
+                  className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-xs font-bold text-white shadow-lg transition-all min-h-[44px]"
                 >
                   Submit Incident
                 </button>

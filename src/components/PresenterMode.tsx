@@ -79,8 +79,8 @@ export const PresenterMode: React.FC<PresenterModeProps> = ({
     : 'text-emerald-400 stroke-emerald-400';
 
   return (
-    <div className={`relative w-full rounded-3xl bg-[#161626] border border-white/5 p-6 sm:p-10 shadow-2xl flex flex-col items-center justify-between min-h-[620px] transition-all overflow-hidden ${
-      isFullscreen ? 'fixed inset-0 z-50 rounded-none p-8 bg-[#0b0b12]' : ''
+    <div className={`relative w-full rounded-3xl bg-[#161626] border border-white/5 p-4 sm:p-8 md:p-10 shadow-2xl flex flex-col items-center justify-between min-h-[520px] sm:min-h-[620px] transition-all overflow-hidden ${
+      isFullscreen ? 'fixed inset-0 z-50 rounded-none p-6 sm:p-8 bg-[#0b0b12]' : ''
     }`}>
       
       {/* Top Background Glow */}
@@ -174,26 +174,26 @@ export const PresenterMode: React.FC<PresenterModeProps> = ({
       </div>
 
       {/* Stage Header */}
-      <div className="w-full flex items-center justify-between z-10">
+      <div className="w-full flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 z-10">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-purple-600/20 border border-purple-500/30 flex items-center justify-center text-purple-300 shadow-[0_0_15px_rgba(147,51,234,0.3)]">
+          <div className="w-10 h-10 rounded-xl bg-purple-600/20 border border-purple-500/30 flex items-center justify-center text-purple-300 shadow-[0_0_15px_rgba(147,51,234,0.3)] shrink-0">
             <Mic className="w-5 h-5" />
           </div>
           <div>
             <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-purple-400 block mb-0.5">
               PRESENTER STAGE VIEW • {currentSegment?.assignedLead || 'Standing By'}
             </span>
-            <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+            <h2 className="text-lg sm:text-2xl font-black text-white tracking-tight leading-tight">
               {currentSegment?.title || 'Waiting for Service to Begin'}
             </h2>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
           <button
             id="btn-holy-spirit-stage"
             onClick={onOpenHolySpiritModal}
-            className="px-3.5 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 text-xs font-bold flex items-center gap-1.5 transition-all shadow-[0_0_15px_rgba(245,158,11,0.2)]"
+            className="px-3.5 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 text-xs font-bold flex items-center gap-1.5 transition-all shadow-[0_0_15px_rgba(245,158,11,0.2)] min-h-[44px]"
           >
             <Flame className="w-4 h-4 fill-amber-400" />
             <span>Holy Spirit Mode</span>
@@ -203,16 +203,16 @@ export const PresenterMode: React.FC<PresenterModeProps> = ({
             id="btn-toggle-fullscreen-presenter"
             onClick={toggleFullscreen}
             title={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen Confidence Monitor'}
-            className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-gray-300 hover:text-white transition-all"
+            className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-gray-300 hover:text-white transition-all min-h-[44px] min-w-[44px] flex items-center justify-center"
           >
             {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
           </button>
         </div>
       </div>
 
-      {/* Massive Circular Countdown Timer */}
-      <div className="relative my-8 flex items-center justify-center z-10">
-        <svg width={size} height={size} className="transform -rotate-90">
+      {/* Massive Circular Countdown Timer (Responsive ViewBox) */}
+      <div className="relative my-6 sm:my-8 flex items-center justify-center z-10 w-full max-w-[320px]">
+        <svg viewBox={`0 0 ${size} ${size}`} className="w-56 h-56 sm:w-72 sm:h-72 md:w-80 md:h-80 transform -rotate-90">
           {/* Background circle track */}
           <circle
             cx={size / 2}
@@ -238,12 +238,12 @@ export const PresenterMode: React.FC<PresenterModeProps> = ({
         </svg>
 
         {/* Center Countdown Text */}
-        <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-4">
-          <span className="text-[10px] uppercase font-bold tracking-[0.2em] text-gray-400">
+        <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-2 sm:p-4">
+          <span className="text-[9px] sm:text-[10px] uppercase font-bold tracking-[0.2em] text-gray-400">
             {localTimer.isOvertime ? 'OVERTIME RUNNING' : 'TIME REMAINING'}
           </span>
           <span
-            className={`text-5xl sm:text-6xl font-black font-timer tracking-tight my-1 ${
+            className={`text-4xl sm:text-5xl md:text-6xl font-black font-timer tracking-tight my-1 ${
               localTimer.isOvertime
                 ? 'text-rose-500 animate-pulse drop-shadow-[0_0_15px_rgba(244,63,94,0.6)]'
                 : localTimer.remainingSeconds < 60
@@ -255,7 +255,7 @@ export const PresenterMode: React.FC<PresenterModeProps> = ({
           >
             {localTimer.formattedTime}
           </span>
-          <span className="text-xs font-mono font-semibold text-purple-300/80 mt-1">
+          <span className="text-[11px] sm:text-xs font-mono font-semibold text-purple-300/80 mt-1">
             Target End: {localTimer.targetEndTimeFormatted}
           </span>
         </div>
