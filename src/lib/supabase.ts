@@ -106,15 +106,15 @@ export function getSupabaseConfig(): {
   const validEnvKey = isLikelySupabaseKey(envKey) ? envKey : '';
   const validEnvUrl = isLikelySupabaseUrl(envUrl) ? envUrl : '';
 
-  const rawUrl = customUrl || validEnvUrl || DEFAULT_SUPABASE_URL;
-  let anonKey = customKey || validEnvKey || DEFAULT_SUPABASE_ANON_KEY;
+  const rawUrl = (customUrl && isLikelySupabaseUrl(customUrl) ? customUrl : '') || validEnvUrl || DEFAULT_SUPABASE_URL;
+  let anonKey = (customKey && isLikelySupabaseKey(customKey) ? customKey : '') || validEnvKey || DEFAULT_SUPABASE_ANON_KEY;
 
   // Guard against any corrupt anonKey value falling through
   if (!isLikelySupabaseKey(anonKey)) {
     anonKey = DEFAULT_SUPABASE_ANON_KEY;
   }
 
-  const url = sanitizeSupabaseUrl(rawUrl);
+  const url = sanitizeSupabaseUrl(rawUrl) || DEFAULT_SUPABASE_URL;
   const isCustom = Boolean(customUrl && customKey && isLikelySupabaseKey(customKey));
   const isConfigured = Boolean(url && anonKey && url.startsWith('http') && isLikelySupabaseKey(anonKey));
 
@@ -730,9 +730,11 @@ export async function testSupabaseConnection(): Promise<{
 let accountsChannelInstance: RealtimeChannel | null = null;
 const accountsListeners = new Set<(accounts: AuthUser[]) => void>();
 
+let accountsTeardownTimeout: any = null;
+
 /**
  * Realtime subscription to `staff_accounts` changes in Supabase.
- * Uses a safe shared subscriber registry to avoid "cannot add postgres_changes callbacks after subscribe()".
+ * Uses a persistent shared channel and debounced teardown to prevent premature socket closure during React mounts.
  */
 export function subscribeToSupabaseAccounts(
   onUpdate: (accounts: AuthUser[]) => void
@@ -740,13 +742,17 @@ export function subscribeToSupabaseAccounts(
   const supabase = getSupabaseClient();
   if (!supabase) return () => {};
 
+  if (accountsTeardownTimeout) {
+    clearTimeout(accountsTeardownTimeout);
+    accountsTeardownTimeout = null;
+  }
+
   accountsListeners.add(onUpdate);
 
   if (!accountsChannelInstance) {
     try {
-      const channelName = `staff_accounts_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
       accountsChannelInstance = supabase
-        .channel(channelName)
+        .channel('staff_accounts_live_sync')
         .on(
           'postgres_changes',
           {
@@ -779,10 +785,15 @@ export function subscribeToSupabaseAccounts(
   return () => {
     accountsListeners.delete(onUpdate);
     if (accountsListeners.size === 0 && accountsChannelInstance) {
-      try {
-        supabase.removeChannel(accountsChannelInstance);
-      } catch {}
-      accountsChannelInstance = null;
+      if (accountsTeardownTimeout) clearTimeout(accountsTeardownTimeout);
+      accountsTeardownTimeout = setTimeout(() => {
+        if (accountsListeners.size === 0 && accountsChannelInstance) {
+          try {
+            supabase.removeChannel(accountsChannelInstance);
+          } catch {}
+          accountsChannelInstance = null;
+        }
+      }, 2000);
     }
   };
 }
@@ -1186,17 +1197,7 @@ export {
 } from './database';
 
 export function broadcastIncidentRealtime(event: RealtimeIncidentEvent): void {
-  const supabase = getSupabaseClient();
-  if (supabase) {
-    try {
-      const channel = supabase.channel('incident_logs_realtime');
-      channel.send({
-        type: 'broadcast',
-        event: 'incident_event',
-        payload: event,
-      });
-    } catch (err) {
-      console.warn('Supabase realtime broadcast error:', err);
-    }
-  }
+  sendSupabaseHubBroadcast('incident_event', event).catch((err) => {
+    console.warn('Supabase realtime incident broadcast error:', err);
+  });
 }
