@@ -37,7 +37,7 @@ interface NavbarProps {
   setActiveTab: (tab: string) => void;
   currentSegment?: ServiceSegment;
   currentUser: AuthUser;
-  onOpenAuthModal: (tab?: 'quick_switch' | 'login' | 'register' | 'manage' | 'permissions' | 'database') => void;
+  onOpenAuthModal: (tab?: 'quick_switch' | 'login' | 'register' | 'manage' | 'permissions') => void;
   onLogout?: () => void;
   selectedClassId: ClassId;
   onSelectClass: (classId: ClassId) => void;
@@ -349,15 +349,6 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             )}
 
-            {/* Database / Supabase Sync Button (Desktop) */}
-            <button
-              onClick={() => onOpenAuthModal('database')}
-              title="Supabase Database & Cloud Accounts Sync"
-              className="hidden sm:flex p-2 rounded-xl bg-[#161626] border border-white/10 hover:border-purple-500/50 hover:bg-purple-600/20 text-gray-400 hover:text-purple-300 transition-all items-center justify-center min-h-[38px] min-w-[38px]"
-            >
-              <Database className="w-3.5 h-3.5" />
-            </button>
-
             {/* Authenticated User Pill Button (Tap to switch user) */}
             <button
               id="btn-quick-user-switch"
@@ -511,18 +502,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <span>+ Add Volunteer</span>
               </button>
             )}
-
-            {/* Database Sync */}
-            <button
-              onClick={() => {
-                onOpenAuthModal('database');
-                setIsMobileMenuOpen(false);
-              }}
-              className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-gray-300 font-bold flex items-center justify-center gap-2 min-h-[44px]"
-            >
-              <Database className="w-4 h-4 text-purple-400" />
-              <span>Database Sync</span>
-            </button>
 
             {/* Emergency Screen Blanking Toggle */}
             <button

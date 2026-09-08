@@ -116,6 +116,8 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
   // Registered Accounts State (Supabase / Local DB)
   const [registeredAccounts, setRegisteredAccounts] = useState<AuthUser[]>(() => getStoredAccountsList());
   const [isSyncingAccounts, setIsSyncingAccounts] = useState<boolean>(true);
+  const [accountsSyncError, setAccountsSyncError] = useState<string | null>(null);
+  const [accountsFetchAttempted, setAccountsFetchAttempted] = useState<boolean>(false);
 
   // Multi-Class Hubs Master State
   const [allClassHubs, setAllClassHubs] = useState<Record<ClassId, ClassHubData>>(() => {
@@ -1117,20 +1119,33 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
   useEffect(() => {
     let isMounted = true;
     setIsSyncingAccounts(true);
+    setAccountsSyncError(null);
 
     // 1. Initial authoritative sync directly from Supabase
     dbSyncWithSupabase()
       .then((res) => {
-        if (isMounted) {
-          setIsSyncingAccounts(false);
-          if (res.synced) {
+        if (!isMounted) return;
+        setIsSyncingAccounts(false);
+        setAccountsFetchAttempted(true);
+        if (res.synced) {
+          setRegisteredAccounts(res.accounts);
+          setAccountsSyncError(null);
+        } else {
+          // Fetch failed (network drop, offline, etc.)
+          const errorMsg = res.error?.message || 'Could not connect to church database. Check internet connection.';
+          setAccountsSyncError(errorMsg);
+          if (res.accounts && res.accounts.length > 0) {
             setRegisteredAccounts(res.accounts);
           }
         }
       })
       .catch((err) => {
         console.warn('Initial cloud accounts sync error:', err);
-        if (isMounted) setIsSyncingAccounts(false);
+        if (isMounted) {
+          setIsSyncingAccounts(false);
+          setAccountsFetchAttempted(true);
+          setAccountsSyncError(err?.message || 'Network connection failed. Tap to retry.');
+        }
       });
 
     // 2. Realtime listener for accounts table changes (cross-device adds/deletes/promotions)
@@ -1138,6 +1153,7 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
       if (isMounted && Array.isArray(updatedAccounts)) {
         const merged = dbSyncRemoteAccounts(updatedAccounts);
         setRegisteredAccounts(merged);
+        setAccountsSyncError(null);
       }
     });
 
@@ -1149,17 +1165,28 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
 
   const syncAccountsWithCloud = useCallback(async () => {
     setIsSyncingAccounts(true);
+    setAccountsSyncError(null);
     try {
       const res = await dbSyncWithSupabase();
       if (res.synced) {
         setRegisteredAccounts(res.accounts);
+        setAccountsSyncError(null);
+      } else {
+        const errorMsg = res.error?.message || 'Could not connect to church database. Tap to retry.';
+        setAccountsSyncError(errorMsg);
+        if (res.accounts && res.accounts.length > 0) {
+          setRegisteredAccounts(res.accounts);
+        }
       }
       return res;
-    } catch (e) {
+    } catch (e: any) {
       console.warn('Cloud sync error:', e);
-      return { synced: false, accounts: registeredAccounts, source: 'local' as const };
+      const msg = e?.message || 'Network connection failed';
+      setAccountsSyncError(msg);
+      return { synced: false, accounts: registeredAccounts, source: 'local' as const, error: { message: msg }, isEmptyConfirmed: false };
     } finally {
       setIsSyncingAccounts(false);
+      setAccountsFetchAttempted(true);
     }
   }, [registeredAccounts]);
 
@@ -1819,6 +1846,8 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
     allClassHubs,
     registeredAccounts,
     isSyncingAccounts,
+    accountsSyncError,
+    accountsFetchAttempted,
     addNewAccount,
     deleteUserAccount,
     clearAllDefaultAccounts,

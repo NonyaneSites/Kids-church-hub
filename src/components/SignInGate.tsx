@@ -33,7 +33,9 @@ interface SignInGateProps {
   registeredAccounts: AuthUser[];
   onAddNewAccount?: (newUser: AuthUser) => void;
   isSyncing?: boolean;
+  syncError?: string | null;
   onRefreshAccounts?: () => void;
+  fetchAttempted?: boolean;
 }
 
 export const SignInGate: React.FC<SignInGateProps> = ({
@@ -41,7 +43,9 @@ export const SignInGate: React.FC<SignInGateProps> = ({
   registeredAccounts = [],
   onAddNewAccount,
   isSyncing = false,
+  syncError = null,
   onRefreshAccounts,
+  fetchAttempted = false,
 }) => {
   const [selectedAccount, setSelectedAccount] = useState<AuthUser | null>(null);
   const [authMethod, setAuthMethod] = useState<'pin' | 'otp'>('pin');
@@ -66,6 +70,8 @@ export const SignInGate: React.FC<SignInGateProps> = ({
   const [regClassId, setRegClassId] = useState<ClassId | 'all'>('all');
   const [regPhone, setRegPhone] = useState('');
   const [regPin, setRegPin] = useState('');
+  const [approvalPin, setApprovalPin] = useState('');
+  const [showApprovalPin, setShowApprovalPin] = useState(false);
   
   // Feedback Messages
   const [errorMessage, setErrorMessage] = useState('');
@@ -586,10 +592,30 @@ export const SignInGate: React.FC<SignInGateProps> = ({
                     )}
                   </div>
                   <span className="text-[10px] text-purple-400 font-normal">
-                    {isSyncing ? 'Connecting to Cloud...' : 'PIN or OTP required'}
+                    {isSyncing ? 'Connecting to Database...' : 'PIN or OTP required'}
                   </span>
                 </div>
                 
+                {/* Offline Warning Banner if accounts are cached but remote fetch encountered an error */}
+                {syncError && registeredAccounts.length > 0 && (
+                  <div className="p-2.5 bg-amber-500/15 border border-amber-500/30 rounded-xl text-xs text-amber-200 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 overflow-hidden">
+                      <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                      <span className="text-[11px] truncate">Offline Cache Active • {syncError}</span>
+                    </div>
+                    {onRefreshAccounts && (
+                      <button
+                        type="button"
+                        onClick={onRefreshAccounts}
+                        disabled={isSyncing}
+                        className="text-[11px] font-bold text-amber-300 hover:text-white underline shrink-0 cursor-pointer"
+                      >
+                        Retry
+                      </button>
+                    )}
+                  </div>
+                )}
+
                 <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
                   {isSyncing && registeredAccounts.length === 0 ? (
                     <div className="text-center py-10 px-4 bg-white/5 rounded-2xl border border-white/5 space-y-3">
@@ -597,9 +623,41 @@ export const SignInGate: React.FC<SignInGateProps> = ({
                       <div className="text-xs font-bold text-white">Connecting to Church Database...</div>
                       <div className="text-[11px] text-gray-400">Loading verified staff accounts from Supabase cloud</div>
                     </div>
+                  ) : syncError && registeredAccounts.length === 0 ? (
+                    <div className="text-center py-8 px-4 bg-red-950/20 rounded-2xl border border-red-500/30 space-y-3">
+                      <AlertCircle className="w-8 h-8 text-red-400 mx-auto" />
+                      <div className="text-xs font-bold text-white">Could Not Connect to Church Database</div>
+                      <p className="text-[11px] text-red-300/80 max-w-sm mx-auto">
+                        {syncError}
+                      </p>
+                      <div className="flex items-center justify-center gap-2 pt-1">
+                        {onRefreshAccounts && (
+                          <button
+                            type="button"
+                            onClick={onRefreshAccounts}
+                            disabled={isSyncing}
+                            className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                            <span>Retry Connection</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={handleGuestSignIn}
+                          className="px-3 py-2 bg-white/10 hover:bg-white/20 text-gray-200 font-bold text-xs rounded-xl transition-all cursor-pointer"
+                        >
+                          Fast Pass
+                        </button>
+                      </div>
+                    </div>
                   ) : filteredAccounts.length === 0 ? (
                     <div className="text-center py-8 px-4 bg-white/5 rounded-2xl border border-white/5 space-y-3">
-                      <p className="text-xs text-gray-400">No staff accounts found in this category.</p>
+                      <p className="text-xs text-gray-400">
+                        {registeredAccounts.length === 0
+                          ? 'No staff accounts found in database. An authorized Director must register the first account.'
+                          : 'No staff accounts found for this role filter.'}
+                      </p>
                       <div className="flex items-center justify-center gap-2">
                         <button
                           type="button"
@@ -740,6 +798,24 @@ export const SignInGate: React.FC<SignInGateProps> = ({
 
                   if (!regPin.trim() || regPin.trim().length < 4) {
                     setErrorMessage('Please enter a secure 4 to 6-digit security PIN for this account.');
+                    return;
+                  }
+
+                  // Verify Approval Authorization Code
+                  const DIRECTOR_APPROVAL_PINS = ['7492', '2504'];
+                  const STAFF_APPROVAL_PINS = ['5813', '7492', '2504'];
+
+                  const requiresDirectorApproval = regRole === 'director' || regRole === 'admin';
+                  const isApproved = requiresDirectorApproval
+                    ? DIRECTOR_APPROVAL_PINS.includes(approvalPin.trim())
+                    : STAFF_APPROVAL_PINS.includes(approvalPin.trim());
+
+                  if (!isApproved) {
+                    if (requiresDirectorApproval) {
+                      setErrorMessage('Authorization Denied: Registering a Director or Class Admin account requires Pastor Hope or Ministry Director approval (PIN: 7492 or Director Override PIN).');
+                    } else {
+                      setErrorMessage('Authorization Denied: Registration requires an authorized Director or Lead Admin approval PIN. Please request the approval PIN from your Kids Ministry Director.');
+                    }
                     return;
                   }
 
@@ -923,7 +999,7 @@ export const SignInGate: React.FC<SignInGateProps> = ({
 
                   <div>
                     <label className="text-[11px] font-bold text-gray-300 block mb-1 uppercase tracking-wider">
-                      Security PIN
+                      Account Login PIN *
                     </label>
                     <input
                       type="password"
@@ -936,12 +1012,48 @@ export const SignInGate: React.FC<SignInGateProps> = ({
                   </div>
                 </div>
 
+                {/* Approval Authorization PIN Requirement */}
+                <div className="p-3.5 bg-amber-950/25 border border-amber-500/40 rounded-2xl space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-bold text-amber-300 flex items-center gap-1.5 uppercase tracking-wider">
+                      <KeyRound className="w-3.5 h-3.5 text-amber-400" />
+                      <span>{regRole === 'director' || regRole === 'admin' ? 'Director Authorization PIN *' : 'Ministry Approval PIN *'}</span>
+                    </label>
+                    <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                      Approval Code Required
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-gray-300 leading-relaxed">
+                    {regRole === 'director' || regRole === 'admin'
+                      ? 'Ministry Executive Security Rule: Creating a Director or Class Admin account requires Pastor Hope’s authorization (PIN: 7492).'
+                      : 'Account Creation Security Rule: Accounts cannot be created without approval. Enter authorization code provided by Pastor Hope or your Ministry Director (e.g. 5813 or 7492).'}
+                  </p>
+                  <div className="relative">
+                    <input
+                      type={showApprovalPin ? 'text' : 'password'}
+                      value={approvalPin}
+                      onChange={(e) => setApprovalPin(e.target.value)}
+                      placeholder={regRole === 'director' || regRole === 'admin' ? 'Enter Director Authorization PIN' : 'Enter Ministry Approval Code'}
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-black/50 border border-amber-500/50 text-white placeholder-gray-500 text-xs font-mono focus:outline-none focus:border-amber-400 transition-colors pr-10"
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowApprovalPin(!showApprovalPin)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white cursor-pointer"
+                      title={showApprovalPin ? 'Hide PIN' : 'Show PIN'}
+                    >
+                      {showApprovalPin ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+
                 <button
                   type="submit"
-                  className="w-full py-2.5 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white text-xs font-bold rounded-xl shadow-lg shadow-amber-600/30 transition-all flex items-center justify-center gap-2"
+                  className="w-full py-2.5 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white text-xs font-bold rounded-xl shadow-lg shadow-amber-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <Crown className="w-4 h-4" />
-                  <span>Create Account & Sign In As {regRole === 'director' ? 'Director' : regRole.toUpperCase()}</span>
+                  <span>Verify Approval & Create {regRole === 'director' ? 'Director' : regRole.toUpperCase()} Account</span>
                 </button>
               </form>
             )}

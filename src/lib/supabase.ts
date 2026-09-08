@@ -338,30 +338,82 @@ export function mapAuthUserToRow(user: AuthUser): SupabaseRowAccount {
   };
 }
 
+export interface SupabaseFetchDetailedResult<T> {
+  success: boolean;
+  data: T | null;
+  error: {
+    message: string;
+    code?: string;
+    status?: number;
+    details?: string;
+    hint?: string;
+  } | null;
+}
+
 /**
- * Fetch all registered accounts from Supabase PostgreSQL
+ * Fetch all registered accounts with full status, error codes, and details
  */
-export async function fetchAccountsFromSupabase(): Promise<AuthUser[] | null> {
+export async function fetchAccountsDetailedFromSupabase(): Promise<SupabaseFetchDetailedResult<AuthUser[]>> {
   const supabase = getSupabaseClient();
-  if (!supabase) return null;
+  if (!supabase) {
+    return {
+      success: false,
+      data: null,
+      error: {
+        message: 'Church database client not initialized or offline.',
+        code: 'CLIENT_UNAVAILABLE',
+        status: 0,
+      },
+    };
+  }
 
   try {
-    const { data, error } = await supabase
+    const { data, error, status, statusText } = await supabase
       .from('staff_accounts')
       .select('*')
       .order('created_at', { ascending: false });
 
     if (error) {
-      console.warn('Supabase fetch accounts error:', error);
-      return null;
+      console.warn('[Supabase staff_accounts SELECT error]:', { status, statusText, error });
+      return {
+        success: false,
+        data: null,
+        error: {
+          message: error.message || 'Error querying church database.',
+          code: error.code || String(status),
+          status,
+          details: error.details,
+          hint: error.hint,
+        },
+      };
     }
 
-    if (!data) return [];
-    return (data as SupabaseRowAccount[]).map(mapRowToAuthUser);
-  } catch (err) {
-    console.warn('Supabase fetch accounts exception:', err);
-    return null;
+    const mapped = ((data as SupabaseRowAccount[]) || []).map(mapRowToAuthUser);
+    return {
+      success: true,
+      data: mapped,
+      error: null,
+    };
+  } catch (err: any) {
+    console.warn('[Supabase staff_accounts SELECT network exception]:', err);
+    return {
+      success: false,
+      data: null,
+      error: {
+        message: err?.message || 'Network connection failed (offline or unreachable).',
+        code: 'NETWORK_DISCONNECTED',
+        status: 0,
+      },
+    };
   }
+}
+
+/**
+ * Fetch all registered accounts from Supabase PostgreSQL
+ */
+export async function fetchAccountsFromSupabase(): Promise<AuthUser[] | null> {
+  const res = await fetchAccountsDetailedFromSupabase();
+  return res.success ? res.data : null;
 }
 
 /**

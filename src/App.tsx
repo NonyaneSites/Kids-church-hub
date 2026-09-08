@@ -36,7 +36,7 @@ export default function App() {
   const [isHolySpiritModalOpen, setIsHolySpiritModalOpen] = useState<boolean>(false);
   const [isMobileSimulatorOpen, setIsMobileSimulatorOpen] = useState<boolean>(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
-  const [authModalInitialTab, setAuthModalInitialTab] = useState<'quick_switch' | 'login' | 'register' | 'manage' | 'permissions' | 'database'>('quick_switch');
+  const [authModalInitialTab, setAuthModalInitialTab] = useState<'quick_switch' | 'login' | 'register' | 'manage' | 'permissions'>('quick_switch');
   const [isDirectorComposeOpen, setIsDirectorComposeOpen] = useState<boolean>(false);
 
   const {
@@ -107,6 +107,8 @@ export default function App() {
     allClassHubs,
     registeredAccounts,
     isSyncingAccounts,
+    accountsSyncError,
+    accountsFetchAttempted,
     addNewAccount,
     deleteUserAccount,
     clearAllDefaultAccounts,
@@ -156,7 +158,7 @@ export default function App() {
     else if (newRole === 'admin') setActiveTab('templates');
   };
 
-  const handleOpenAuthModal = (tab?: 'quick_switch' | 'login' | 'register' | 'manage' | 'permissions' | 'database') => {
+  const handleOpenAuthModal = (tab?: 'quick_switch' | 'login' | 'register' | 'manage' | 'permissions') => {
     setAuthModalInitialTab(tab || 'quick_switch');
     setIsAuthModalOpen(true);
   };
@@ -177,7 +179,9 @@ export default function App() {
         registeredAccounts={registeredAccounts}
         onAddNewAccount={addNewAccount}
         isSyncing={isSyncingAccounts}
+        syncError={accountsSyncError}
         onRefreshAccounts={syncAccountsWithCloud}
+        fetchAttempted={accountsFetchAttempted}
       />
     );
   }

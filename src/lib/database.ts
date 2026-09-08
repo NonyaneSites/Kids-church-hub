@@ -9,6 +9,7 @@ import {
   updateAccountAdminInSupabase,
   updateAccountPinInSupabase,
   fetchAccountsFromSupabase,
+  fetchAccountsDetailedFromSupabase,
   syncAllAccountsToSupabase,
   sendSupabaseHubBroadcast,
 } from './supabase';
@@ -251,35 +252,70 @@ export function dbResetDefaultAccounts(): AuthUser[] {
   }
 }
 
+export interface DbSyncResult {
+  synced: boolean;
+  accounts: AuthUser[];
+  source: 'supabase' | 'local';
+  error: { message: string; code?: string; status?: number; details?: string } | null;
+  isEmptyConfirmed: boolean;
+}
+
 /**
  * Server-authoritative sync between local storage and Supabase:
  * Remote Supabase is the single source of truth.
  * Whatever is in Supabase (1 account, 0 accounts, or N accounts) is mirrored to local storage.
  * Never re-uploads deleted or local dummy accounts.
+ * If the fetch fails (due to network failure, offline, RLS, etc.), it returns the error
+ * so the UI can present an explicit retry state instead of an empty list.
  */
-export async function dbSyncWithSupabase(): Promise<{
-  synced: boolean;
-  accounts: AuthUser[];
-  source: 'supabase' | 'local';
-}> {
+export async function dbSyncWithSupabase(): Promise<DbSyncResult> {
   if (!isSupabaseConfigured()) {
-    return { synced: false, accounts: dbGetAccounts(), source: 'local' };
+    return {
+      synced: false,
+      accounts: dbGetAccounts(),
+      source: 'local',
+      error: { message: 'Church database credentials are not configured.', code: 'NOT_CONFIGURED' },
+      isEmptyConfirmed: false,
+    };
   }
 
   try {
-    const remoteAccounts = await fetchAccountsFromSupabase();
+    const detailed = await fetchAccountsDetailedFromSupabase();
 
-    // If remote Supabase returned data (an array), it is strictly authoritative
-    if (remoteAccounts !== null && Array.isArray(remoteAccounts)) {
-      localStorage.setItem(LOCAL_STORAGE_ACCOUNTS_KEY, JSON.stringify(remoteAccounts));
-      syncToIndexedDB(remoteAccounts);
-      return { synced: true, accounts: remoteAccounts, source: 'supabase' };
-    } 
+    if (detailed.success && detailed.data !== null && Array.isArray(detailed.data)) {
+      // Successful query: remote Supabase is authoritative
+      localStorage.setItem(LOCAL_STORAGE_ACCOUNTS_KEY, JSON.stringify(detailed.data));
+      syncToIndexedDB(detailed.data);
+      return {
+        synced: true,
+        accounts: detailed.data,
+        source: 'supabase',
+        error: null,
+        isEmptyConfirmed: detailed.data.length === 0,
+      };
+    }
 
-    return { synced: false, accounts: dbGetAccounts(), source: 'local' };
-  } catch (e) {
-    console.warn('Supabase sync error:', e);
-    return { synced: false, accounts: dbGetAccounts(), source: 'local' };
+    // Supabase query failed (network, RLS, timeout, etc.)
+    // Do NOT overwrite local cache; return the real error object
+    const localAccounts = dbGetAccounts();
+    console.warn('[dbSyncWithSupabase] Cloud sync unsuccessful. Error:', detailed.error);
+    return {
+      synced: false,
+      accounts: localAccounts,
+      source: 'local',
+      error: detailed.error || { message: 'Could not fetch accounts from church database.' },
+      isEmptyConfirmed: false,
+    };
+  } catch (e: any) {
+    console.warn('[dbSyncWithSupabase] Exception during sync:', e);
+    const localAccounts = dbGetAccounts();
+    return {
+      synced: false,
+      accounts: localAccounts,
+      source: 'local',
+      error: { message: e?.message || 'Network connection failed' },
+      isEmptyConfirmed: false,
+    };
   }
 }
 
