@@ -47,7 +47,7 @@ import {
   updateAccountPin,
   dbSyncWithSupabase,
   subscribeToSupabaseAccounts,
-  getSupabaseHubChannel,
+  subscribeToSupabaseHubBroadcast,
   sendSupabaseHubBroadcast,
 } from '../lib/supabase';
 import { dbSyncRemoteAccounts } from '../lib/database';
@@ -574,56 +574,19 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
     }
   }, [handleIncomingBroadcast]);
 
-  // Real-time Supabase postgres change listener: keeps accounts synced live across all browser windows and tabs
-  useEffect(() => {
-    const unsubscribe = subscribeToSupabaseAccounts((remoteAccounts) => {
-      if (remoteAccounts && remoteAccounts.length > 0) {
-        dbSyncRemoteAccounts(remoteAccounts);
-        setRegisteredAccounts(remoteAccounts);
-      }
-    });
-    return () => {
-      unsubscribe();
-    };
-  }, []);
-
   // Connect to Supabase Realtime Broadcast Channel for true multi-device synchronization
   useEffect(() => {
-    const supabase = getSupabaseClient();
-    if (!supabase) return;
-
-    try {
-      const hubChannel = getSupabaseHubChannel();
-      if (hubChannel) {
-        // Listen to all broadcast events coming from other devices on this channel
-        hubChannel.on('broadcast', { event: '*' }, (message: { event: string; payload: any }) => {
-          const data = message.payload as BroadcastChannelEvent;
-          if (data && data.senderId !== clientIdRef.current) {
-            handleIncomingBroadcast(data);
-          }
-        });
+    const unsubscribeHub = subscribeToSupabaseHubBroadcast((message) => {
+      const data = message.payload as BroadcastChannelEvent;
+      if (data && data.senderId !== clientIdRef.current) {
+        handleIncomingBroadcast(data);
       }
+    });
 
-      // Also listen to dedicated incident_logs_realtime channel for backward compatibility
-      const incidentChannel = supabase.channel('incident_logs_realtime');
-      incidentChannel
-        .on('broadcast', { event: 'incident_event' }, ({ payload }) => {
-          if (payload && payload.incident) {
-            const inc = payload.incident as IncidentLog;
-            setIncidents((prev) => [inc, ...prev.filter((i) => i.id !== inc.id)]);
-            setActiveIncidentAlert(inc);
-            playCueSound(inc.severity === 'critical' ? 'emergency' : inc.severity === 'medium' ? 'urgent' : 'normal');
-          }
-        })
-        .subscribe();
-
-      return () => {
-        supabase.removeChannel(incidentChannel);
-      };
-    } catch (err) {
-      console.warn('Supabase realtime subscription error:', err);
-    }
-  }, [handleIncomingBroadcast, playCueSound]);
+    return () => {
+      unsubscribeHub();
+    };
+  }, [handleIncomingBroadcast]);
 
   // Clean up expired stage cues every 2 seconds
   useEffect(() => {

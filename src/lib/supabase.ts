@@ -135,6 +135,7 @@ export const SUPABASE_HUB_CHANNEL_NAME = 'kids_church_hub_live';
 
 let hubChannelInstance: RealtimeChannel | null = null;
 let currentHubClientKey = '';
+const hubListeners = new Set<(message: { event: string; payload: any }) => void>();
 
 export function getSupabaseHubChannel(): RealtimeChannel | null {
   const supabase = getSupabaseClient();
@@ -158,6 +159,17 @@ export function getSupabaseHubChannel(): RealtimeChannel | null {
       },
     });
 
+    // Attach broadcast listener BEFORE calling .subscribe() to avoid lifecycle errors
+    hubChannelInstance.on('broadcast', { event: '*' }, (message: { event: string; payload: any }) => {
+      hubListeners.forEach((listener) => {
+        try {
+          listener(message);
+        } catch (e) {
+          console.warn('Error in hub broadcast listener:', e);
+        }
+      });
+    });
+
     hubChannelInstance.subscribe((status: string) => {
       console.debug('[Supabase Realtime Hub] Subscription Status:', status);
     });
@@ -167,6 +179,21 @@ export function getSupabaseHubChannel(): RealtimeChannel | null {
     console.warn('Failed to initialize Supabase Hub Channel:', err);
     return null;
   }
+}
+
+/**
+ * Subscribe to realtime broadcast events from other devices over the Supabase Hub
+ */
+export function subscribeToSupabaseHubBroadcast(
+  onBroadcast: (message: { event: string; payload: any }) => void
+): () => void {
+  hubListeners.add(onBroadcast);
+  // Ensure hub channel is initialized and connected
+  getSupabaseHubChannel();
+
+  return () => {
+    hubListeners.delete(onBroadcast);
+  };
 }
 
 /**
@@ -563,8 +590,12 @@ export async function testSupabaseConnection(): Promise<{
   }
 }
 
+let accountsChannelInstance: RealtimeChannel | null = null;
+const accountsListeners = new Set<(accounts: AuthUser[]) => void>();
+
 /**
- * Realtime subscription to `staff_accounts` changes in Supabase
+ * Realtime subscription to `staff_accounts` changes in Supabase.
+ * Uses a safe shared subscriber registry to avoid "cannot add postgres_changes callbacks after subscribe()".
  */
 export function subscribeToSupabaseAccounts(
   onUpdate: (accounts: AuthUser[]) => void
@@ -572,32 +603,51 @@ export function subscribeToSupabaseAccounts(
   const supabase = getSupabaseClient();
   if (!supabase) return () => {};
 
-  try {
-    const channel = supabase
-      .channel('realtime_staff_accounts_changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'staff_accounts',
-        },
-        async () => {
-          const fresh = await fetchAccountsFromSupabase();
-          if (fresh) {
-            onUpdate(fresh);
-          }
-        }
-      )
-      .subscribe();
+  accountsListeners.add(onUpdate);
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  } catch (err) {
-    console.warn('Failed to subscribe to Supabase realtime accounts:', err);
-    return () => {};
+  if (!accountsChannelInstance) {
+    try {
+      const channelName = `staff_accounts_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      accountsChannelInstance = supabase
+        .channel(channelName)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'staff_accounts',
+          },
+          async () => {
+            const fresh = await fetchAccountsFromSupabase();
+            if (fresh) {
+              accountsListeners.forEach((listener) => {
+                try {
+                  listener(fresh);
+                } catch (e) {
+                  console.warn('Error in account realtime listener:', e);
+                }
+              });
+            }
+          }
+        );
+
+      accountsChannelInstance.subscribe((status: string) => {
+        console.debug('[Supabase Realtime Accounts] Subscription Status:', status);
+      });
+    } catch (err) {
+      console.warn('Failed to subscribe to Supabase realtime accounts:', err);
+    }
   }
+
+  return () => {
+    accountsListeners.delete(onUpdate);
+    if (accountsListeners.size === 0 && accountsChannelInstance) {
+      try {
+        supabase.removeChannel(accountsChannelInstance);
+      } catch {}
+      accountsChannelInstance = null;
+    }
+  };
 }
 
 // -------------------------------------------------------------
