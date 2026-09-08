@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="100%" height="100%">
+  <defs>
+    <radialGradient id="crcBg" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#FBBF24" />
+      <stop offset="60%" stop-color="#F59E0B" />
+      <stop offset="100%" stop-color="#D97706" />
+    </radialGradient>
+    <radialGradient id="crcGlow" cx="40%" cy="35%" r="60%">
+      <stop offset="0%" stop-color="#FDE68A" stop-opacity="0.4" />
+      <stop offset="100%" stop-color="#D97706" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+
+  <!-- Background Yellow Circle -->
+  <circle cx="100" cy="100" r="96" fill="url(#crcBg)" />
+  
+  <!-- Subtle organic contour ripples matching CRC Kids Church badge -->
+  <circle cx="100" cy="100" r="88" fill="none" stroke="#FDE68A" stroke-width="1.5" opacity="0.35" />
+  <circle cx="100" cy="100" r="80" fill="none" stroke="#FBBF24" stroke-width="1.2" opacity="0.25" />
+  <circle cx="100" cy="100" r="72" fill="none" stroke="#FDE68A" stroke-width="1.5" opacity="0.3" />
+  <circle cx="100" cy="100" r="64" fill="none" stroke="#FBBF24" stroke-width="1" opacity="0.2" />
+
+  <!-- Lighting overlay -->
+  <circle cx="100" cy="100" r="96" fill="url(#crcGlow)" />
+
+  <!-- Crisp White Outer Ring -->
+  <circle cx="100" cy="100" r="84" fill="none" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round" />
+
+  <!-- Bold White CRC Text -->
+  <text 
+    x="100" 
+    y="122" 
+    font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" 
+    font-size="64" 
+    font-weight="900" 
+    letter-spacing="-1.5" 
+    fill="#FFFFFF" 
+    text-anchor="middle"
+    dominant-baseline="alphabetic"
+  >CRC</text>
+</svg>

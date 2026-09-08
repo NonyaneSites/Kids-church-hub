@@ -47,9 +47,10 @@ import {
   updateAccountPin,
   dbSyncWithSupabase,
   subscribeToSupabaseAccounts,
+  getSupabaseHubChannel,
+  sendSupabaseHubBroadcast,
 } from '../lib/supabase';
-import { subscribeToFirestoreAccounts } from '../lib/firebase';
-import { dbSyncFirestoreAccounts } from '../lib/database';
+import { dbSyncRemoteAccounts } from '../lib/database';
 import { CLASSES_CONFIG, getAllDefaultClassHubs } from '../data/classHubsData';
 
 // Persistent storage keys
@@ -364,7 +365,175 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
     } catch {}
   }, []);
 
-  // Broadcast dispatch method supporting Supabase broadcast and BroadcastChannel API
+  // Unified incoming broadcast handler for both same-machine BroadcastChannel and cross-device Supabase Realtime
+  const handleIncomingBroadcast = useCallback((data: BroadcastChannelEvent) => {
+    if (!data || data.senderId === clientIdRef.current) return;
+
+    switch (data.event) {
+      case 'STAGE_CUE': {
+        const cue = data.payload as StageCueBroadcast;
+        setActiveCues((prev) => [cue, ...prev.filter((c) => c.id !== cue.id)]);
+        playCueSound(cue.priority);
+        break;
+      }
+      case 'CUE_COPIED': {
+        const { cueId, ack } = data.payload as { cueId: string; ack: StageCueCopyAck };
+        if (cueId && ack) {
+          setActiveCues((prev) =>
+            prev.map((c) => {
+              if (c.id === cueId) {
+                const copies = c.copies || [];
+                if (!copies.some((cp) => cp.userId === ack.userId)) {
+                  return { ...c, copies: [...copies, ack] };
+                }
+              }
+              return c;
+            })
+          );
+          playRogerBeep();
+        }
+        break;
+      }
+      case 'SERVICE_STATE_UPDATE': {
+        const newState = data.payload as ServiceState;
+        setServiceState(newState);
+        break;
+      }
+      case 'HOLY_SPIRIT_OVERRIDE': {
+        const override = data.payload as HolySpiritOverridePayload;
+        setServiceState((prev) => ({
+          ...prev,
+          targetEndTime: override.newTargetEndTime,
+          lastUpdated: new Date().toISOString(),
+        }));
+        playCueSound('urgent');
+        break;
+      }
+      case 'EMERGENCY_OVERRIDE': {
+        const emergency = data.payload as EmergencyBroadcast;
+        setServiceState((prev) => ({
+          ...prev,
+          isEmergencyActive: emergency.isActive,
+          activeEmergencyType: emergency.isActive ? emergency.action : null,
+          lastUpdated: new Date().toISOString(),
+        }));
+        if (emergency.isActive) playCueSound('emergency');
+        break;
+      }
+      case 'CHECKLIST_UPDATE': {
+        const updatedList = data.payload as PreServiceCheckItem[];
+        setChecklist(updatedList);
+        break;
+      }
+      case 'SLIDE_CHANGE': {
+        const { slideIndex } = data.payload as { slideIndex: number };
+        setServiceState((prev) => ({ ...prev, currentSlideIndex: slideIndex }));
+        break;
+      }
+      case 'WORSHIP_CHANGE': {
+        const { songId, isPlaying } = data.payload as { songId: string; isPlaying: boolean };
+        setWorshipQueue((prev) =>
+          prev.map((s) => ({
+            ...s,
+            isPlaying: s.id === songId ? isPlaying : false,
+          }))
+        );
+        break;
+      }
+      case 'NOTIFICATION': {
+        const notif = data.payload as { id: string; to: string; message: string; timestamp: string };
+        setNotifications((prev) => [notif, ...prev]);
+        break;
+      }
+      case 'INCIDENT_ADDED': {
+        const inc = data.payload as IncidentLog;
+        setIncidents((prev) => [inc, ...prev.filter((i) => i.id !== inc.id)]);
+        setActiveIncidentAlert(inc);
+        playCueSound(inc.severity === 'critical' ? 'emergency' : inc.severity === 'medium' ? 'urgent' : 'normal');
+        break;
+      }
+      case 'SERVICE_TEMPLATES_UPDATE': {
+        const tmpls = data.payload as ServiceTemplate[];
+        setServiceTemplates(tmpls);
+        saveStoredTemplates(tmpls);
+        break;
+      }
+      case 'DIRECTOR_ANNOUNCEMENT': {
+        const announcement = data.payload as DirectorAnnouncement;
+        setActiveDirectorAnnouncement(announcement);
+        playCueSound(
+          announcement.severity === 'emergency'
+            ? 'emergency'
+            : announcement.severity === 'important'
+            ? 'urgent'
+            : 'normal'
+        );
+        break;
+      }
+      case 'COMMS_EMERGENCY': {
+        const alert = data.payload as CommsEmergencyAlert;
+        setCommsEmergencyAlerts((prev) => [alert, ...prev.filter((a) => a.id !== alert.id)]);
+        playCueSound('emergency');
+        break;
+      }
+      case 'CALENDAR_UPDATE': {
+        const events = data.payload as CalendarEvent[];
+        setCalendarEvents(events);
+        break;
+      }
+      case 'QUICK_PRESETS_UPDATE': {
+        const presets = data.payload as QuickStagePreset[];
+        setQuickStagePresets(presets);
+        break;
+      }
+      case 'WEEKLY_RESET': {
+        setServiceState({
+          serviceId: 'srv-' + Date.now(),
+          serviceName: 'Sunday Service',
+          date: new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }),
+          theme: '',
+          currentSegmentId: null,
+          targetEndTime: null,
+          targetDurationSeconds: 0,
+          isPaused: false,
+          lastUpdated: new Date().toISOString(),
+          currentSlideIndex: 1,
+          totalSlides: 1,
+          activeWorshipSongId: null,
+          isEmergencyActive: false,
+          activeEmergencyType: null,
+        });
+        setSegments((prev) => prev.map((s) => ({ ...s, status: 'upcoming' })));
+        setChecklist((prev) => prev.map((item) => ({ ...item, isChecked: false })));
+        setReviewData({
+          ratings: { equipment: 0, timing: 0, communication: 0, kidsEngagement: 0, holySpiritFlow: 0, overall: 0 },
+          whatWentWell: '',
+          notes: '',
+        });
+        setActiveCues([]);
+        setCommsEmergencyAlerts([]);
+        setIncidents([]);
+        setNotifications([]);
+        break;
+      }
+      case 'AUTH_USER_CHANGE': {
+        const payload = data.payload as any;
+        if (payload?.action === 'deleted' && payload?.deletedId) {
+          setRegisteredAccounts((prev) => prev.filter((a) => a.id !== payload.deletedId));
+        } else if (payload?.action === 'saved' && payload?.user) {
+          const user = payload.user as AuthUser;
+          setRegisteredAccounts((prev) => [user, ...prev.filter((a) => a.id !== user.id)]);
+        } else if (payload?.action === 'cleared_defaults' && Array.isArray(payload?.remaining)) {
+          setRegisteredAccounts(payload.remaining);
+        } else if (payload?.action === 'reset_defaults' && Array.isArray(payload?.accounts)) {
+          setRegisteredAccounts(payload.accounts);
+        }
+        break;
+      }
+    }
+  }, [playCueSound, playRogerBeep]);
+
+  // Real Broadcast dispatch method sending over BOTH BroadcastChannel and Supabase Realtime Channel
   const dispatchBroadcast = useCallback(<T,>(event: BroadcastChannelEvent<T>['event'], payload: T) => {
     const message: BroadcastChannelEvent<T> = {
       type: 'broadcast',
@@ -374,6 +543,7 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
       senderId: clientIdRef.current,
     };
 
+    // 1. Same-device cross-tab / cross-window BroadcastChannel API
     if (broadcastChannelRef.current) {
       try {
         broadcastChannelRef.current.postMessage(message);
@@ -382,9 +552,10 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
       }
     }
 
-    // Mock Supabase channel send interface log for protocol compatibility:
-    // supabase.channel('room').send({ type: 'broadcast', event, payload })
-    console.debug(`[Supabase Realtime Broadcast] ${event}:`, payload);
+    // 2. Real cross-device Supabase Realtime Channel send: reaches phones, tablets, stage computers!
+    sendSupabaseHubBroadcast(event, message).catch((err) => {
+      console.warn(`[Supabase Realtime Broadcast Error for ${event}]:`, err);
+    });
   }, []);
 
   // Initialize Broadcast Channel listener for instant cross-tab / cross-window sync
@@ -394,139 +565,21 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
       broadcastChannelRef.current = channel;
 
       channel.onmessage = (event: MessageEvent<BroadcastChannelEvent>) => {
-        const { data } = event;
-        if (!data || data.senderId === clientIdRef.current) return;
-
-        switch (data.event) {
-          case 'STAGE_CUE': {
-            const cue = data.payload as StageCueBroadcast;
-            setActiveCues((prev) => [cue, ...prev.filter((c) => c.id !== cue.id)]);
-            playCueSound(cue.priority);
-            break;
-          }
-          case 'CUE_COPIED': {
-            const { cueId, ack } = data.payload as { cueId: string; ack: StageCueCopyAck };
-            if (cueId && ack) {
-              setActiveCues((prev) =>
-                prev.map((c) => {
-                  if (c.id === cueId) {
-                    const copies = c.copies || [];
-                    if (!copies.some((cp) => cp.userId === ack.userId)) {
-                      return { ...c, copies: [...copies, ack] };
-                    }
-                  }
-                  return c;
-                })
-              );
-              playRogerBeep();
-            }
-            break;
-          }
-          case 'SERVICE_STATE_UPDATE': {
-            const newState = data.payload as ServiceState;
-            setServiceState(newState);
-            break;
-          }
-          case 'HOLY_SPIRIT_OVERRIDE': {
-            const override = data.payload as HolySpiritOverridePayload;
-            setServiceState((prev) => ({
-              ...prev,
-              targetEndTime: override.newTargetEndTime,
-              lastUpdated: new Date().toISOString(),
-            }));
-            playCueSound('urgent');
-            break;
-          }
-          case 'EMERGENCY_OVERRIDE': {
-            const emergency = data.payload as EmergencyBroadcast;
-            setServiceState((prev) => ({
-              ...prev,
-              isEmergencyActive: emergency.isActive,
-              activeEmergencyType: emergency.isActive ? emergency.action : null,
-              lastUpdated: new Date().toISOString(),
-            }));
-            if (emergency.isActive) playCueSound('emergency');
-            break;
-          }
-          case 'CHECKLIST_UPDATE': {
-            const updatedList = data.payload as PreServiceCheckItem[];
-            setChecklist(updatedList);
-            break;
-          }
-          case 'SLIDE_CHANGE': {
-            const { slideIndex } = data.payload as { slideIndex: number };
-            setServiceState((prev) => ({ ...prev, currentSlideIndex: slideIndex }));
-            break;
-          }
-          case 'WORSHIP_CHANGE': {
-            const { songId, isPlaying } = data.payload as { songId: string; isPlaying: boolean };
-            setWorshipQueue((prev) =>
-              prev.map((s) => ({
-                ...s,
-                isPlaying: s.id === songId ? isPlaying : false,
-              }))
-            );
-            break;
-          }
-          case 'NOTIFICATION': {
-            const notif = data.payload as { id: string; to: string; message: string; timestamp: string };
-            setNotifications((prev) => [notif, ...prev]);
-            break;
-          }
-          case 'INCIDENT_ADDED': {
-            const inc = data.payload as IncidentLog;
-            setIncidents((prev) => [inc, ...prev.filter(i => i.id !== inc.id)]);
-            setActiveIncidentAlert(inc);
-            playCueSound(inc.severity === 'critical' ? 'emergency' : inc.severity === 'medium' ? 'urgent' : 'normal');
-            break;
-          }
-          case 'SERVICE_TEMPLATES_UPDATE': {
-            const tmpls = data.payload as ServiceTemplate[];
-            setServiceTemplates(tmpls);
-            saveStoredTemplates(tmpls);
-            break;
-          }
-          case 'DIRECTOR_ANNOUNCEMENT': {
-            const announcement = data.payload as DirectorAnnouncement;
-            setActiveDirectorAnnouncement(announcement);
-            playCueSound(announcement.severity === 'emergency' ? 'emergency' : announcement.severity === 'important' ? 'urgent' : 'normal');
-            break;
-          }
-          case 'COMMS_EMERGENCY': {
-            const alert = data.payload as CommsEmergencyAlert;
-            setCommsEmergencyAlerts((prev) => [alert, ...prev.filter((a) => a.id !== alert.id)]);
-            playCueSound('emergency');
-            break;
-          }
-          case 'CALENDAR_UPDATE': {
-            const events = data.payload as CalendarEvent[];
-            setCalendarEvents(events);
-            break;
-          }
-          case 'QUICK_PRESETS_UPDATE': {
-            const presets = data.payload as QuickStagePreset[];
-            setQuickStagePresets(presets);
-            break;
-          }
-          case 'WEEKLY_RESET': {
-            resetWeeklyServiceState();
-            break;
-          }
-        }
+        handleIncomingBroadcast(event.data);
       };
 
       return () => {
         channel.close();
       };
     }
-  }, [playCueSound, playRogerBeep]);
+  }, [handleIncomingBroadcast]);
 
-  // Real-time Firestore account listener: keeps accounts synced live across all browser windows and tabs
+  // Real-time Supabase postgres change listener: keeps accounts synced live across all browser windows and tabs
   useEffect(() => {
-    const unsubscribe = subscribeToFirestoreAccounts((remoteAccounts) => {
+    const unsubscribe = subscribeToSupabaseAccounts((remoteAccounts) => {
       if (remoteAccounts && remoteAccounts.length > 0) {
-        const merged = dbSyncFirestoreAccounts(remoteAccounts);
-        setRegisteredAccounts(merged);
+        dbSyncRemoteAccounts(remoteAccounts);
+        setRegisteredAccounts(remoteAccounts);
       }
     });
     return () => {
@@ -534,14 +587,26 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
     };
   }, []);
 
-  // Connect to Supabase Realtime Channel if client is available
+  // Connect to Supabase Realtime Broadcast Channel for true multi-device synchronization
   useEffect(() => {
     const supabase = getSupabaseClient();
     if (!supabase) return;
 
     try {
-      const channel = supabase.channel('incident_logs_realtime');
-      channel
+      const hubChannel = getSupabaseHubChannel();
+      if (hubChannel) {
+        // Listen to all broadcast events coming from other devices on this channel
+        hubChannel.on('broadcast', { event: '*' }, (message: { event: string; payload: any }) => {
+          const data = message.payload as BroadcastChannelEvent;
+          if (data && data.senderId !== clientIdRef.current) {
+            handleIncomingBroadcast(data);
+          }
+        });
+      }
+
+      // Also listen to dedicated incident_logs_realtime channel for backward compatibility
+      const incidentChannel = supabase.channel('incident_logs_realtime');
+      incidentChannel
         .on('broadcast', { event: 'incident_event' }, ({ payload }) => {
           if (payload && payload.incident) {
             const inc = payload.incident as IncidentLog;
@@ -553,12 +618,12 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
         .subscribe();
 
       return () => {
-        supabase.removeChannel(channel);
+        supabase.removeChannel(incidentChannel);
       };
     } catch (err) {
-      console.warn('Supabase subscription error:', err);
+      console.warn('Supabase realtime subscription error:', err);
     }
-  }, [playCueSound]);
+  }, [handleIncomingBroadcast, playCueSound]);
 
   // Clean up expired stage cues every 2 seconds
   useEffect(() => {
@@ -1079,7 +1144,7 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
     // 2. Realtime listener for accounts table changes
     const unsubscribe = subscribeToSupabaseAccounts((updatedAccounts) => {
       if (isMounted && Array.isArray(updatedAccounts) && updatedAccounts.length > 0) {
-        const merged = dbSyncFirestoreAccounts(updatedAccounts);
+        const merged = dbSyncRemoteAccounts(updatedAccounts);
         setRegisteredAccounts(merged);
       }
     });

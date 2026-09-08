@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { AuthUser, Role, ClassId } from '../types/hub';
 import { CLASSES_CONFIG } from '../data/classHubsData';
+import { CrcLogo } from './CrcLogo';
 
 interface SignInGateProps {
   onSignIn: (user: AuthUser) => void;
@@ -59,7 +60,7 @@ export const SignInGate: React.FC<SignInGateProps> = ({
   const [regRole, setRegRole] = useState<Role>('director');
   const [regClassId, setRegClassId] = useState<ClassId | 'all'>('all');
   const [regPhone, setRegPhone] = useState('');
-  const [regPin, setRegPin] = useState('2026');
+  const [regPin, setRegPin] = useState('');
   
   // Feedback Messages
   const [errorMessage, setErrorMessage] = useState('');
@@ -83,11 +84,11 @@ export const SignInGate: React.FC<SignInGateProps> = ({
     setErrorMessage('');
     if (!selectedAccount) return;
 
-    const expectedPin = selectedAccount.pin || '2026';
-    if (enteredPin.trim() === expectedPin || enteredPin.trim() === '2026') {
+    const expectedPin = (selectedAccount.pin || '').trim();
+    if (expectedPin && enteredPin.trim() === expectedPin) {
       onSignIn({ ...selectedAccount, isAuthenticated: true });
     } else {
-      setErrorMessage(`Invalid Security PIN. Please check your credentials or use default PIN '2026' for demo testing.`);
+      setErrorMessage('Invalid Security PIN. Please enter the correct PIN assigned to this account.');
     }
   };
 
@@ -105,7 +106,7 @@ export const SignInGate: React.FC<SignInGateProps> = ({
     setErrorMessage('');
     if (!selectedAccount || !generatedOtp) return;
 
-    if (enteredOtp.trim() === generatedOtp || enteredOtp.trim() === '202626') {
+    if (enteredOtp.trim() === generatedOtp) {
       onSignIn({ ...selectedAccount, isAuthenticated: true });
     } else {
       setErrorMessage(`Invalid 6-digit verification code. Please enter the code sent to ${selectedAccount.phone || 'your phone'}.`);
@@ -186,8 +187,8 @@ export const SignInGate: React.FC<SignInGateProps> = ({
         
         {/* Header Branding */}
         <div className="text-center space-y-2">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-tr from-purple-700 via-indigo-600 to-amber-500 shadow-[0_0_30px_rgba(147,51,234,0.4)] text-white font-black text-xl mb-1">
-            KC
+          <div className="flex justify-center mb-1">
+            <CrcLogo className="w-14 h-14 shadow-xl" />
           </div>
           
           <div>
@@ -316,9 +317,6 @@ export const SignInGate: React.FC<SignInGateProps> = ({
                     <label className="text-[11px] font-bold uppercase tracking-wider text-gray-300">
                       Enter Security PIN
                     </label>
-                    <span className="text-[10px] text-amber-400 font-mono">
-                      Default Demo PIN: <strong>2026</strong>
-                    </span>
                   </div>
                   
                   <div className="relative">
@@ -346,15 +344,8 @@ export const SignInGate: React.FC<SignInGateProps> = ({
 
                 <div className="flex items-center gap-2">
                   <button
-                    type="button"
-                    onClick={() => setEnteredPin(selectedAccount.pin || '2026')}
-                    className="px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 text-[11px] font-semibold transition-colors"
-                  >
-                    Quick Auto-Fill (2026)
-                  </button>
-                  <button
                     type="submit"
-                    className="flex-1 py-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:brightness-110 text-white text-xs font-bold rounded-xl shadow-lg shadow-purple-600/30 transition-all flex items-center justify-center gap-2 active:scale-95"
+                    className="w-full py-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:brightness-110 text-white text-xs font-bold rounded-xl shadow-lg shadow-purple-600/30 transition-all flex items-center justify-center gap-2 active:scale-95"
                   >
                     <LogIn className="w-4 h-4" />
                     <span>Verify PIN & Enter Console</span>
@@ -705,6 +696,17 @@ export const SignInGate: React.FC<SignInGateProps> = ({
                     return;
                   }
 
+                  const cleanEmail = regEmail.trim().toLowerCase();
+                  if (registeredAccounts.some((a) => (a.email || '').toLowerCase() === cleanEmail)) {
+                    setErrorMessage(`An account with email "${cleanEmail}" is already registered.`);
+                    return;
+                  }
+
+                  if (!regPin.trim() || regPin.trim().length < 4) {
+                    setErrorMessage('Please enter a secure 4 to 6-digit security PIN for this account.');
+                    return;
+                  }
+
                   const effectiveRole: Role = regRole;
                   const effectiveClassId: ClassId | 'all' = effectiveRole === 'director' ? 'all' : regClassId;
                   const fallbackTitle = effectiveRole === 'director'
@@ -720,14 +722,14 @@ export const SignInGate: React.FC<SignInGateProps> = ({
                   const newAccount: AuthUser = {
                     id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
                     name: regName.trim(),
-                    email: regEmail.trim().toLowerCase(),
+                    email: cleanEmail,
                     role: effectiveRole,
                     assignedClassId: effectiveClassId,
                     roleTitle: fallbackTitle,
                     phone: regPhone.trim() || '+27 82 123 4567',
                     avatarColor: effectiveRole === 'director' ? 'from-amber-500 to-orange-600' : effectiveRole === 'admin' ? 'from-purple-500 to-indigo-600' : effectiveRole === 'tech' ? 'from-blue-500 to-cyan-600' : effectiveRole === 'presenter' ? 'from-pink-500 to-rose-600' : 'from-emerald-500 to-teal-600',
                     isClassAdmin: effectiveRole === 'admin' || effectiveRole === 'director',
-                    pin: regPin.trim() || '2026',
+                    pin: regPin.trim(),
                     isAuthenticated: true,
                   };
 
@@ -892,7 +894,7 @@ export const SignInGate: React.FC<SignInGateProps> = ({
                       maxLength={6}
                       value={regPin}
                       onChange={(e) => setRegPin(e.target.value)}
-                      placeholder="e.g. 2026"
+                      placeholder="4-6 digits"
                       className="w-full px-3.5 py-2.5 rounded-xl bg-black/40 border border-white/10 text-white placeholder-gray-500 text-xs focus:outline-none focus:border-amber-500"
                     />
                   </div>

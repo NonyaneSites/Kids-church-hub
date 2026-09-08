@@ -40,6 +40,7 @@ import {
 } from 'lucide-react';
 import { Role, AuthUser, ClassId, ClassInfo } from '../types/hub';
 import { CLASSES_CONFIG } from '../data/classHubsData';
+import { CrcLogo } from './CrcLogo';
 import { 
   validateSouthAfricanPhone, 
   formatSouthAfricanDisplay, 
@@ -226,7 +227,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const defaultClass = isClassAdmin && currentUser.assignedClassId !== 'all' ? currentUser.assignedClassId : 'jy';
   const [regName, setRegName] = useState('');
   const [regEmail, setRegEmail] = useState('');
-  const [regPin, setRegPin] = useState('2026');
+  const [regPin, setRegPin] = useState('');
   const [regPhone, setRegPhone] = useState('');
   const [regRole, setRegRole] = useState<Role>('director');
   const [regClassId, setRegClassId] = useState<ClassId>('all');
@@ -272,8 +273,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     e.preventDefault();
     if (!pendingSwitchUser) return;
 
-    const expectedPin = pendingSwitchUser.pin || '2026';
-    if (switchPinInput.trim() === expectedPin || switchPinInput.trim() === '2026') {
+    const expectedPin = (pendingSwitchUser.pin || '').trim();
+    if (expectedPin && switchPinInput.trim() === expectedPin) {
       onSwitchUser({ ...pendingSwitchUser, isAuthenticated: true });
       const classLabel = pendingSwitchUser.assignedClassId === 'all' 
         ? 'All Classes' 
@@ -285,7 +286,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         setSuccessMsg('');
       }, 500);
     } else {
-      setErrorMsg('Incorrect PIN. Please enter the security PIN for this account (Demo default: 2026).');
+      setErrorMsg('Incorrect PIN. Please enter the valid security PIN for this account.');
     }
   };
 
@@ -304,6 +305,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
     if (!regEmail.trim()) {
       setErrorMsg('Please enter a valid email address');
+      return;
+    }
+
+    const cleanEmail = regEmail.trim().toLowerCase();
+    const existing = registeredAccounts || [];
+    if (existing.some((a) => (a.email || '').toLowerCase() === cleanEmail)) {
+      setErrorMsg(`An account with email "${cleanEmail}" is already registered. Emails must be unique.`);
+      return;
+    }
+
+    if (!regPin.trim() || regPin.trim().length < 4) {
+      setErrorMsg('Please enter a secure 4 to 6-digit security PIN for this account.');
       return;
     }
 
@@ -338,7 +351,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     const newAccount: AuthUser = {
       id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       name: regName.trim(),
-      email: regEmail.trim().toLowerCase(),
+      email: cleanEmail,
       role: effectiveRole,
       assignedClassId: effectiveClassId,
       roleTitle: regRoleTitle.trim() || fallbackTitle,
@@ -346,7 +359,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       whatsapp: zaWhatsApp,
       avatarColor: regAvatarColor,
       isClassAdmin: isDirector ? regIsClassAdmin : false,
-      pin: regPin.trim() || '2026',
+      pin: regPin.trim(),
       isAuthenticated: true,
     };
 
@@ -465,9 +478,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         {/* Header Ribbon */}
         <div className="flex items-center justify-between pb-3 border-b border-white/5 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-purple-700 via-indigo-600 to-amber-500 flex items-center justify-center text-white font-black text-sm shadow-[0_0_20px_rgba(147,51,234,0.4)]">
-              KC
-            </div>
+            <CrcLogo className="w-10 h-10 shadow-lg" />
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="text-base font-black text-white uppercase tracking-tight">
@@ -633,9 +644,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       <label className="text-[10px] font-bold uppercase tracking-wider text-gray-300">
                         Enter Security PIN
                       </label>
-                      <span className="text-[10px] text-amber-400 font-mono">
-                        Demo PIN: <strong>2026</strong>
-                      </span>
                     </div>
                     <div className="relative">
                       <input
@@ -659,15 +667,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
                   <div className="flex items-center gap-2">
                     <button
-                      type="button"
-                      onClick={() => setSwitchPinInput(pendingSwitchUser.pin || '2026')}
-                      className="px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 text-[11px] font-semibold transition-colors"
-                    >
-                      Auto-Fill (2026)
-                    </button>
-                    <button
                       type="submit"
-                      className="flex-1 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:brightness-110 text-white text-xs font-bold rounded-xl shadow-lg shadow-purple-600/30 transition-all flex items-center justify-center gap-1.5"
+                      className="w-full py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:brightness-110 text-white text-xs font-bold rounded-xl shadow-lg shadow-purple-600/30 transition-all flex items-center justify-center gap-1.5"
                     >
                       <LogIn className="w-3.5 h-3.5" />
                       <span>Verify & Switch Station</span>
@@ -837,7 +838,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     required
                     value={regPin}
                     onChange={(e) => setRegPin(e.target.value)}
-                    placeholder="2026"
+                    placeholder="4-6 digits"
                     maxLength={8}
                     className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 font-mono text-center tracking-widest font-bold"
                   />
@@ -1250,8 +1251,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                               </span>
                             )}
                             {user.pin && (
-                              <span className="text-[9px] text-gray-400 font-mono">
-                                PIN: {user.pin}
+                              <span className="text-[9px] text-gray-500 font-mono tracking-widest">
+                                PIN: ••••
                               </span>
                             )}
                           </div>

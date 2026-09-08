@@ -1,21 +1,37 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
 import { 
   Role, 
   AuthUser, 
   IncidentLog, 
   ServiceTemplate, 
   ServiceTemplateSegment,
-  RealtimeIncidentEvent 
+  RealtimeIncidentEvent,
+  BroadcastChannelEvent
 } from '../types/hub';
 
 // Storage keys for custom client-side Supabase configuration
 const STORAGE_SUPABASE_URL_KEY = 'kch_custom_supabase_url';
 const STORAGE_SUPABASE_KEY_KEY = 'kch_custom_supabase_anon_key';
 
+// Default Supabase project credentials for CRC Kids Church Hub
+export const DEFAULT_SUPABASE_URL = 'https://ifyhflqwdlgnqfryojxi.supabase.co';
+export const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_oOQnfQSz1hRmshsKyQK0WQ_vvtdldEO';
+
+export function sanitizeSupabaseUrl(rawUrl: string): string {
+  if (!rawUrl) return '';
+  let url = rawUrl.trim();
+  // Strip trailing /rest/v1 or /rest/v1/ if user pasted full REST endpoint
+  url = url.replace(/\/rest\/v1\/?$/, '');
+  // Strip trailing slashes
+  url = url.replace(/\/+$/, '');
+  return url;
+}
+
 /**
  * Resolve active Supabase URL & Anon Key:
  * 1. Environment variables (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY)
  * 2. In-app localStorage credentials entered by user
+ * 3. Default production CRC Kids Church Hub Supabase project
  */
 export function getSupabaseConfig(): {
   url: string;
@@ -35,8 +51,9 @@ export function getSupabaseConfig(): {
     } catch (e) {}
   }
 
-  const url = customUrl || envUrl;
-  const anonKey = customKey || envKey;
+  const rawUrl = customUrl || envUrl || DEFAULT_SUPABASE_URL;
+  const anonKey = customKey || envKey || DEFAULT_SUPABASE_ANON_KEY;
+  const url = sanitizeSupabaseUrl(rawUrl);
   const isCustom = Boolean(customUrl && customKey);
   const isConfigured = Boolean(url && anonKey && url.startsWith('http'));
 
@@ -50,7 +67,7 @@ export function getSupabaseConfig(): {
 
 export function saveCustomSupabaseConfig(url: string, anonKey: string): boolean {
   try {
-    const cleanUrl = url.trim();
+    const cleanUrl = sanitizeSupabaseUrl(url);
     const cleanKey = anonKey.trim();
     if (!cleanUrl || !cleanKey) return false;
 
@@ -58,6 +75,7 @@ export function saveCustomSupabaseConfig(url: string, anonKey: string): boolean 
     localStorage.setItem(STORAGE_SUPABASE_KEY_KEY, cleanKey);
     // Reset singleton instance so client recreates with new credentials
     supabaseInstance = null;
+    hubChannelInstance = null;
     return true;
   } catch (e) {
     console.warn('Failed to store custom Supabase config:', e);
@@ -70,6 +88,7 @@ export function clearCustomSupabaseConfig(): void {
     localStorage.removeItem(STORAGE_SUPABASE_URL_KEY);
     localStorage.removeItem(STORAGE_SUPABASE_KEY_KEY);
     supabaseInstance = null;
+    hubChannelInstance = null;
   } catch (e) {}
 }
 
@@ -92,7 +111,7 @@ export function getSupabaseClient(): SupabaseClient | null {
         },
         realtime: {
           params: {
-            eventsPerSecond: 10,
+            eventsPerSecond: 15,
           },
         },
       });
@@ -110,18 +129,83 @@ export function isSupabaseConfigured(): boolean {
 }
 
 // -------------------------------------------------------------
+// SUPABASE REALTIME BROADCAST HUB (CROSS-DEVICE COMMS)
+// -------------------------------------------------------------
+export const SUPABASE_HUB_CHANNEL_NAME = 'kids_church_hub_live';
+
+let hubChannelInstance: RealtimeChannel | null = null;
+let currentHubClientKey = '';
+
+export function getSupabaseHubChannel(): RealtimeChannel | null {
+  const supabase = getSupabaseClient();
+  if (!supabase) return null;
+
+  const { url, anonKey } = getSupabaseConfig();
+  const clientKey = `${url}::${anonKey}`;
+
+  if (hubChannelInstance && currentHubClientKey === clientKey) {
+    return hubChannelInstance;
+  }
+
+  try {
+    currentHubClientKey = clientKey;
+    hubChannelInstance = supabase.channel(SUPABASE_HUB_CHANNEL_NAME, {
+      config: {
+        broadcast: {
+          self: false,
+          ack: true,
+        },
+      },
+    });
+
+    hubChannelInstance.subscribe((status: string) => {
+      console.debug('[Supabase Realtime Hub] Subscription Status:', status);
+    });
+
+    return hubChannelInstance;
+  } catch (err) {
+    console.warn('Failed to initialize Supabase Hub Channel:', err);
+    return null;
+  }
+}
+
+/**
+ * Broadcast an event over the shared Supabase Realtime channel.
+ * Reaches all other connected devices across networks and browsers instantly!
+ */
+export async function sendSupabaseHubBroadcast<T>(event: string, payload: T): Promise<boolean> {
+  const channel = getSupabaseHubChannel();
+  if (!channel) {
+    console.debug('[Supabase Broadcast Skipped]: Supabase client or channel not ready');
+    return false;
+  }
+
+  try {
+    const res = await channel.send({
+      type: 'broadcast',
+      event,
+      payload,
+    });
+    return res === 'ok';
+  } catch (err) {
+    console.warn(`[Supabase Realtime Send Error for ${event}]:`, err);
+    return false;
+  }
+}
+
+// -------------------------------------------------------------
 // POSTGRES TABLE SETUP SCRIPT FOR USER TO RUN IN SUPABASE SQL EDITOR
 // -------------------------------------------------------------
 export const SUPABASE_STAFF_ACCOUNTS_SQL = `-- ========================================================
--- CRC KIDS CHURCH HUB - STAFF ACCOUNTS TABLE & POLICIES
+-- CRC KIDS CHURCH HUB - STAFF ACCOUNTS TABLE & REALTIME POLICIES
 -- Copy and run this script in your Supabase Project -> SQL Editor
 -- ========================================================
 
--- 1. Create staff_accounts table
+-- 1. Create staff_accounts table with UNIQUE email constraint
 CREATE TABLE IF NOT EXISTS public.staff_accounts (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
-  email TEXT NOT NULL,
+  email TEXT NOT NULL UNIQUE,
   role TEXT NOT NULL DEFAULT 'volunteer',
   role_title TEXT DEFAULT '',
   assigned_class_id TEXT DEFAULT 'kb',
@@ -129,11 +213,25 @@ CREATE TABLE IF NOT EXISTS public.staff_accounts (
   whatsapp TEXT DEFAULT '',
   avatar_color TEXT DEFAULT 'from-purple-600 to-indigo-600',
   is_class_admin BOOLEAN DEFAULT FALSE,
-  pin TEXT DEFAULT '2026',
+  pin TEXT DEFAULT '',
   is_admin_promoted_by TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Ensure UNIQUE constraint on email if table was previously created without it
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'staff_accounts_email_unique'
+  ) THEN
+    BEGIN
+      ALTER TABLE public.staff_accounts ADD CONSTRAINT staff_accounts_email_unique UNIQUE (email);
+    EXCEPTION WHEN duplicate_table THEN
+      -- Already exists or constraint name variation
+    END;
+  END IF;
+END $$;
 
 -- 2. Helpful indexes for fast querying
 CREATE INDEX IF NOT EXISTS idx_staff_accounts_email ON public.staff_accounts(email);
@@ -181,7 +279,7 @@ export function mapRowToAuthUser(row: SupabaseRowAccount): AuthUser {
   return {
     id: row.id,
     name: row.name || 'Team Member',
-    email: (row.email || '').toLowerCase(),
+    email: (row.email || '').toLowerCase().trim(),
     role: (row.role as Role) || 'volunteer',
     roleTitle: row.role_title || '',
     assignedClassId: (row.assigned_class_id as any) || 'kb',
@@ -189,7 +287,7 @@ export function mapRowToAuthUser(row: SupabaseRowAccount): AuthUser {
     whatsapp: row.whatsapp || '',
     avatarColor: row.avatar_color || 'from-purple-600 to-indigo-600',
     isClassAdmin: Boolean(row.is_class_admin),
-    pin: row.pin || '2026',
+    pin: row.pin || '',
     isAdminPromotedBy: row.is_admin_promoted_by || undefined,
     isAuthenticated: true,
   };
@@ -199,7 +297,7 @@ export function mapAuthUserToRow(user: AuthUser): SupabaseRowAccount {
   return {
     id: user.id,
     name: user.name || 'Team Member',
-    email: (user.email || '').toLowerCase(),
+    email: (user.email || '').toLowerCase().trim(),
     role: user.role || 'volunteer',
     role_title: user.roleTitle || '',
     assigned_class_id: user.assignedClassId || 'kb',
@@ -207,7 +305,7 @@ export function mapAuthUserToRow(user: AuthUser): SupabaseRowAccount {
     whatsapp: user.whatsapp || '',
     avatar_color: user.avatarColor || 'from-purple-600 to-indigo-600',
     is_class_admin: Boolean(user.isClassAdmin),
-    pin: user.pin || '2026',
+    pin: user.pin || '',
     is_admin_promoted_by: user.isAdminPromotedBy || null,
     updated_at: new Date().toISOString(),
   };
@@ -240,31 +338,57 @@ export async function fetchAccountsFromSupabase(): Promise<AuthUser[] | null> {
 }
 
 /**
- * Save or update an account in Supabase
+ * Save or update an account in Supabase with duplicate email prevention
  */
-export async function saveAccountToSupabase(user: AuthUser): Promise<boolean> {
+export async function saveAccountToSupabase(user: AuthUser): Promise<{ success: boolean; error?: string }> {
   const supabase = getSupabaseClient();
-  if (!supabase) return false;
+  if (!supabase) return { success: false, error: 'Supabase client is not configured.' };
 
   try {
+    const cleanEmail = (user.email || '').toLowerCase().trim();
+
+    // Check if email already belongs to a different user ID
+    if (cleanEmail) {
+      const { data: existingAccounts, error: checkErr } = await supabase
+        .from('staff_accounts')
+        .select('id, email')
+        .eq('email', cleanEmail);
+
+      if (!checkErr && existingAccounts && existingAccounts.length > 0) {
+        const conflict = existingAccounts.find((r) => r.id !== user.id);
+        if (conflict) {
+          return {
+            success: false,
+            error: `An account with email "${cleanEmail}" already exists. Please choose a unique email.`,
+          };
+        }
+      }
+    }
+
     const row = mapAuthUserToRow(user);
     const { error } = await supabase
       .from('staff_accounts')
       .upsert(row, { onConflict: 'id' });
 
     if (error) {
+      if (error.code === '23505' || error.message.includes('unique') || error.message.includes('duplicate')) {
+        return {
+          success: false,
+          error: `An account with email "${cleanEmail}" already exists. Please choose a unique email.`,
+        };
+      }
       console.warn('Supabase save account error:', error);
-      return false;
+      return { success: false, error: error.message };
     }
-    return true;
-  } catch (err) {
+    return { success: true };
+  } catch (err: any) {
     console.warn('Supabase save account exception:', err);
-    return false;
+    return { success: false, error: err?.message || 'Failed to save account to Supabase' };
   }
 }
 
 /**
- * Delete an account from Supabase
+ * Delete an account strictly by its unique ID from Supabase
  */
 export async function deleteAccountFromSupabase(userId: string): Promise<boolean> {
   const supabase = getSupabaseClient();
@@ -490,7 +614,7 @@ export const PRECONFIGURED_USERS: AuthUser[] = [
     avatarColor: 'from-amber-500 to-orange-600',
     phone: '+27 82 123 4567',
     whatsapp: '27821234567',
-    pin: '2026',
+    pin: '7492',
     isAuthenticated: true,
   },
   {
@@ -503,7 +627,7 @@ export const PRECONFIGURED_USERS: AuthUser[] = [
     avatarColor: 'from-purple-600 to-indigo-600',
     phone: '+27 82 234 5678',
     whatsapp: '27822345678',
-    pin: '2026',
+    pin: '5813',
     isClassAdmin: true,
     isAuthenticated: true,
   },
@@ -517,7 +641,7 @@ export const PRECONFIGURED_USERS: AuthUser[] = [
     avatarColor: 'from-blue-600 to-cyan-600',
     phone: '+27 82 345 6789',
     whatsapp: '27823456789',
-    pin: '2026',
+    pin: '3924',
     isAuthenticated: true,
   },
   {
@@ -530,7 +654,7 @@ export const PRECONFIGURED_USERS: AuthUser[] = [
     avatarColor: 'from-emerald-600 to-teal-600',
     phone: '+27 82 456 7890',
     whatsapp: '27824567890',
-    pin: '2026',
+    pin: '8165',
     isAuthenticated: true,
   },
   {
@@ -543,7 +667,7 @@ export const PRECONFIGURED_USERS: AuthUser[] = [
     avatarColor: 'from-purple-600 to-pink-600',
     phone: '+27 82 567 8901',
     whatsapp: '27825678901',
-    pin: '2026',
+    pin: '4207',
     isAuthenticated: true,
   },
 ];

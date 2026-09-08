@@ -10,12 +10,8 @@ import {
   updateAccountPinInSupabase,
   fetchAccountsFromSupabase,
   syncAllAccountsToSupabase,
+  sendSupabaseHubBroadcast,
 } from './supabase';
-import {
-  saveAccountToFirestore,
-  deleteAccountFromFirestore,
-  fetchAccountsFromFirestore,
-} from './firebase';
 
 const DB_NAME = 'CRCKidsChurchDB';
 const DB_VERSION = 1;
@@ -23,55 +19,7 @@ const STORE_ACCOUNTS = 'accounts';
 const STORE_META = 'metadata';
 
 const LOCAL_STORAGE_ACCOUNTS_KEY = 'crc_kids_church_accounts_db_v6';
-const LOCAL_STORAGE_DELETED_KEY = 'crc_kids_church_deleted_accounts_v6';
 const LOCAL_STORAGE_CLEARED_FLAG = 'crc_kids_church_seed_cleared_v6';
-
-// Track deleted account IDs and emails permanently so they aren't accidentally revived
-function getPermanentlyDeletedKeys(): { ids: string[]; emails: string[] } {
-  try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_DELETED_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      return {
-        ids: Array.isArray(parsed.ids) ? parsed.ids : [],
-        emails: Array.isArray(parsed.emails) ? parsed.emails : [],
-      };
-    }
-  } catch (e) {
-    console.warn('Error reading deleted keys:', e);
-  }
-  return { ids: [], emails: [] };
-}
-
-function savePermanentlyDeletedKey(id: string, email?: string): void {
-  try {
-    const current = getPermanentlyDeletedKeys();
-    if (id && !current.ids.includes(id)) {
-      current.ids.push(id);
-    }
-    if (email && !current.emails.includes(email.toLowerCase())) {
-      current.emails.push(email.toLowerCase());
-    }
-    localStorage.setItem(LOCAL_STORAGE_DELETED_KEY, JSON.stringify(current));
-  } catch (e) {
-    console.warn('Error recording deleted key:', e);
-  }
-}
-
-/**
- * Remove an ID or email from the permanent deletion registry.
- * This guarantees newly created accounts with previously used IDs/emails will never disappear!
- */
-export function removePermanentlyDeletedKey(id: string, email?: string): void {
-  try {
-    const current = getPermanentlyDeletedKeys();
-    const newIds = current.ids.filter((i) => i !== id);
-    const newEmails = email ? current.emails.filter((e) => e.toLowerCase() !== email.toLowerCase()) : current.emails;
-    localStorage.setItem(LOCAL_STORAGE_DELETED_KEY, JSON.stringify({ ids: newIds, emails: newEmails }));
-  } catch (e) {
-    console.warn('Error unmarking deleted key:', e);
-  }
-}
 
 // -------------------------------------------------------------
 // INDEXED-DB ASYNCHRONOUS DATABASE STORAGE ENGINE
@@ -79,24 +27,18 @@ export function removePermanentlyDeletedKey(id: string, email?: string): void {
 let idbInstance: IDBDatabase | null = null;
 
 function openIndexedDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    if (typeof window === 'undefined' || !window.indexedDB) {
-      reject(new Error('IndexedDB not supported in this environment'));
-      return;
-    }
-    if (idbInstance) {
-      resolve(idbInstance);
-      return;
-    }
+  if (idbInstance) return Promise.resolve(idbInstance);
+  if (typeof window === 'undefined' || !('indexedDB' in window)) {
+    return Promise.reject(new Error('IndexedDB not supported in environment'));
+  }
 
+  return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
 
     request.onupgradeneeded = (event: IDBVersionChangeEvent) => {
       const db = (event.target as IDBOpenDBRequest).result;
       if (!db.objectStoreNames.contains(STORE_ACCOUNTS)) {
-        const store = db.createObjectStore(STORE_ACCOUNTS, { keyPath: 'id' });
-        store.createIndex('email', 'email', { unique: false });
-        store.createIndex('assignedClassId', 'assignedClassId', { unique: false });
+        db.createObjectStore(STORE_ACCOUNTS, { keyPath: 'id' });
       }
       if (!db.objectStoreNames.contains(STORE_META)) {
         db.createObjectStore(STORE_META, { keyPath: 'key' });
@@ -139,12 +81,10 @@ export async function syncToIndexedDB(accounts: AuthUser[]): Promise<void> {
 
 /**
  * Retrieve accounts list from the database.
- * Filters out any accounts that were deleted by the user.
  */
 export function dbGetAccounts(): AuthUser[] {
   try {
     const isCleared = localStorage.getItem(LOCAL_STORAGE_CLEARED_FLAG) === 'true';
-    const deleted = getPermanentlyDeletedKeys();
     const raw = localStorage.getItem(LOCAL_STORAGE_ACCOUNTS_KEY);
 
     let accounts: AuthUser[] = [];
@@ -158,20 +98,10 @@ export function dbGetAccounts(): AuthUser[] {
       // First boot: populate with initial preconfigured staff
       accounts = [...PRECONFIGURED_USERS];
       localStorage.setItem(LOCAL_STORAGE_ACCOUNTS_KEY, JSON.stringify(accounts));
+      syncToIndexedDB(accounts);
     }
 
-    // Filter out any permanently deleted accounts
-    const sanitized = accounts.filter(
-      (a) => !deleted.ids.includes(a.id) && !deleted.emails.includes((a.email || '').toLowerCase())
-    );
-
-    // If cleaned list is different, update storage
-    if (sanitized.length !== accounts.length) {
-      localStorage.setItem(LOCAL_STORAGE_ACCOUNTS_KEY, JSON.stringify(sanitized));
-      syncToIndexedDB(sanitized);
-    }
-
-    return sanitized;
+    return accounts;
   } catch (e) {
     console.error('Error fetching accounts from database:', e);
     return [];
@@ -180,31 +110,29 @@ export function dbGetAccounts(): AuthUser[] {
 
 /**
  * Insert or update an account in the database.
- * Persists to IndexedDB/localStorage AND syncs immediately to Firestore & Supabase.
+ * Persists to IndexedDB/localStorage AND syncs immediately to Supabase.
  */
 export function dbSaveAccount(user: AuthUser): AuthUser[] {
   try {
-    // CRITICAL: Un-mark from permanently deleted keys so this account will NEVER disappear!
-    removePermanentlyDeletedKey(user.id, user.email);
-
     const list = dbGetAccounts();
-    const filtered = list.filter((u) => u.id !== user.id && u.email.toLowerCase() !== user.email.toLowerCase());
+    // Match strictly by unique user ID
+    const filtered = list.filter((u) => u.id !== user.id);
     const updated = [user, ...filtered];
 
     localStorage.setItem(LOCAL_STORAGE_ACCOUNTS_KEY, JSON.stringify(updated));
     syncToIndexedDB(updated);
 
-    // Sync to Firestore cloud database
-    saveAccountToFirestore(user).catch((e) => {
-      console.warn('Firestore sync failed:', e);
-    });
-
     // Sync to Supabase cloud database
-    saveAccountToSupabase(user).then((success) => {
-      if (success) {
+    saveAccountToSupabase(user).then((res) => {
+      if (res.success) {
         console.debug('Saved account to Supabase:', user.email);
+      } else {
+        console.warn('Supabase save notice:', res.error);
       }
     });
+
+    // Broadcast account update across real-time network
+    sendSupabaseHubBroadcast('AUTH_USER_CHANGE', { action: 'saved', user }).catch(() => {});
 
     return updated;
   } catch (e) {
@@ -214,35 +142,30 @@ export function dbSaveAccount(user: AuthUser): AuthUser[] {
 }
 
 /**
- * Permanently delete an account from the database.
- * Adds ID and email to the permanent deletion registry and deletes from Firestore & Supabase.
+ * Server-Authoritative Account Deletion:
+ * 1. Matches strictly by unique ID only (never by email).
+ * 2. Directly deletes the row in Supabase.
+ * 3. Removes from local storage and IndexedDB.
+ * 4. Broadcasts deletion over Supabase Realtime channel so all other devices update immediately.
  */
 export function dbDeleteAccount(userId: string): AuthUser[] {
   try {
     const list = dbGetAccounts();
-    const target = list.find((u) => u.id === userId);
 
-    if (target) {
-      savePermanentlyDeletedKey(target.id, target.email);
-    } else {
-      savePermanentlyDeletedKey(userId);
-    }
-
-    const updated = list.filter((u) => u.id !== userId && (!target || u.email.toLowerCase() !== target.email.toLowerCase()));
+    // Strictly filter out by ID only
+    const updated = list.filter((u) => u.id !== userId);
     localStorage.setItem(LOCAL_STORAGE_ACCOUNTS_KEY, JSON.stringify(updated));
     syncToIndexedDB(updated);
 
-    // Remove from Firestore cloud database
-    deleteAccountFromFirestore(userId).catch((e) => {
-      console.warn('Firestore delete failed:', e);
-    });
-
-    // Remove from Supabase cloud database
+    // Execute real DELETE against Supabase Postgres row
     deleteAccountFromSupabase(userId).then((success) => {
       if (success) {
-        console.debug('Deleted account from Supabase:', userId);
+        console.debug('Deleted account row from Supabase:', userId);
       }
     });
+
+    // Broadcast deletion across all connected devices
+    sendSupabaseHubBroadcast('AUTH_USER_CHANGE', { action: 'deleted', deletedId: userId }).catch(() => {});
 
     return updated;
   } catch (e) {
@@ -252,37 +175,26 @@ export function dbDeleteAccount(userId: string): AuthUser[] {
 }
 
 /**
- * Merge remote accounts fetched from Firestore into the local database
+ * Merge or replace remote accounts into the local database (Server-Authoritative)
  */
-export function dbSyncFirestoreAccounts(remoteAccounts: AuthUser[]): AuthUser[] {
+export function dbSyncRemoteAccounts(remoteAccounts: AuthUser[]): AuthUser[] {
   try {
-    if (!remoteAccounts || remoteAccounts.length === 0) return dbGetAccounts();
-    const deleted = getPermanentlyDeletedKeys();
-    const local = dbGetAccounts();
-
-    const mergedMap = new Map<string, AuthUser>();
-
-    // Add local accounts
-    for (const acc of local) {
-      mergedMap.set(acc.id, acc);
+    if (!Array.isArray(remoteAccounts) || remoteAccounts.length === 0) {
+      return dbGetAccounts();
     }
-
-    // Merge or add remote accounts (unless explicitly marked as deleted)
-    for (const rem of remoteAccounts) {
-      if (!deleted.ids.includes(rem.id) && !deleted.emails.includes((rem.email || '').toLowerCase())) {
-        mergedMap.set(rem.id, rem);
-      }
-    }
-
-    const merged = Array.from(mergedMap.values());
-    localStorage.setItem(LOCAL_STORAGE_ACCOUNTS_KEY, JSON.stringify(merged));
-    syncToIndexedDB(merged);
-    return merged;
+    
+    // Server is authoritative: save remote accounts list to local storage
+    localStorage.setItem(LOCAL_STORAGE_ACCOUNTS_KEY, JSON.stringify(remoteAccounts));
+    syncToIndexedDB(remoteAccounts);
+    return remoteAccounts;
   } catch (e) {
-    console.warn('Error syncing Firestore accounts to local:', e);
+    console.warn('Error syncing remote accounts to local:', e);
     return dbGetAccounts();
   }
 }
+
+// Backward-compatible alias for existing imports
+export const dbSyncFirestoreAccounts = dbSyncRemoteAccounts;
 
 /**
  * Remove ALL default demo seed accounts from the database.
@@ -291,21 +203,18 @@ export function dbClearDefaultAccounts(): AuthUser[] {
   try {
     localStorage.setItem(LOCAL_STORAGE_CLEARED_FLAG, 'true');
 
+    const defaultIds = PRECONFIGURED_USERS.map((u) => u.id);
     PRECONFIGURED_USERS.forEach((pre) => {
-      savePermanentlyDeletedKey(pre.id, pre.email);
       deleteAccountFromSupabase(pre.id);
     });
 
     const list = dbGetAccounts();
-    const defaultIds = PRECONFIGURED_USERS.map((u) => u.id);
-    const defaultEmails = PRECONFIGURED_USERS.map((u) => u.email.toLowerCase());
-
-    const remaining = list.filter(
-      (u) => !defaultIds.includes(u.id) && !defaultEmails.includes((u.email || '').toLowerCase())
-    );
+    const remaining = list.filter((u) => !defaultIds.includes(u.id));
 
     localStorage.setItem(LOCAL_STORAGE_ACCOUNTS_KEY, JSON.stringify(remaining));
     syncToIndexedDB(remaining);
+
+    sendSupabaseHubBroadcast('AUTH_USER_CHANGE', { action: 'cleared_defaults', remaining }).catch(() => {});
 
     return remaining;
   } catch (e) {
@@ -320,12 +229,14 @@ export function dbClearDefaultAccounts(): AuthUser[] {
 export function dbResetDefaultAccounts(): AuthUser[] {
   try {
     localStorage.removeItem(LOCAL_STORAGE_CLEARED_FLAG);
-    localStorage.removeItem(LOCAL_STORAGE_DELETED_KEY);
     localStorage.setItem(LOCAL_STORAGE_ACCOUNTS_KEY, JSON.stringify(PRECONFIGURED_USERS));
     syncToIndexedDB(PRECONFIGURED_USERS);
     
     // Push seed accounts to Supabase
     syncAllAccountsToSupabase(PRECONFIGURED_USERS);
+
+    sendSupabaseHubBroadcast('AUTH_USER_CHANGE', { action: 'reset_defaults', accounts: PRECONFIGURED_USERS }).catch(() => {});
+
     return PRECONFIGURED_USERS;
   } catch (e) {
     console.error('Failed to reset default accounts:', e);
@@ -334,7 +245,9 @@ export function dbResetDefaultAccounts(): AuthUser[] {
 }
 
 /**
- * Bidirectional sync between local storage and Supabase
+ * Server-authoritative sync between local storage and Supabase:
+ * Remote Supabase is the single source of truth.
+ * Never re-upload an account that is missing from remote.
  */
 export async function dbSyncWithSupabase(): Promise<{
   synced: boolean;
@@ -349,41 +262,15 @@ export async function dbSyncWithSupabase(): Promise<{
     const remoteAccounts = await fetchAccountsFromSupabase();
     const localAccounts = dbGetAccounts();
 
+    // 1. If remote Supabase returned accounts, remote is authoritative
     if (remoteAccounts && remoteAccounts.length > 0) {
-      const deleted = getPermanentlyDeletedKeys();
-      const mergedMap = new Map<string, AuthUser>();
-
-      // 1. Add local accounts first
-      for (const acc of localAccounts) {
-        if (!deleted.ids.includes(acc.id) && !deleted.emails.includes((acc.email || '').toLowerCase())) {
-          mergedMap.set(acc.id, acc);
-        }
-      }
-
-      // 2. Merge remote accounts
-      for (const rem of remoteAccounts) {
-        if (!deleted.ids.includes(rem.id) && !deleted.emails.includes((rem.email || '').toLowerCase())) {
-          mergedMap.set(rem.id, rem);
-        }
-      }
-
-      const merged = Array.from(mergedMap.values());
-      localStorage.setItem(LOCAL_STORAGE_ACCOUNTS_KEY, JSON.stringify(merged));
-      syncToIndexedDB(merged);
-
-      // Push any locally registered accounts that aren't yet in remote Supabase
-      for (const loc of localAccounts) {
-        const inRemote = remoteAccounts.some(
-          (r) => r.id === loc.id || (r.email && r.email.toLowerCase() === (loc.email || '').toLowerCase())
-        );
-        if (!inRemote) {
-          saveAccountToSupabase(loc).catch(() => {});
-        }
-      }
-
-      return { synced: true, accounts: merged, source: 'supabase' };
-    } else if (remoteAccounts && remoteAccounts.length === 0 && localAccounts.length > 0) {
-      // Supabase table is empty, push existing local accounts to Supabase
+      localStorage.setItem(LOCAL_STORAGE_ACCOUNTS_KEY, JSON.stringify(remoteAccounts));
+      syncToIndexedDB(remoteAccounts);
+      return { synced: true, accounts: remoteAccounts, source: 'supabase' };
+    } 
+    
+    // 2. If remote table exists but has 0 records and local has seed/accounts, seed remote
+    if (remoteAccounts && remoteAccounts.length === 0 && localAccounts.length > 0) {
       await syncAllAccountsToSupabase(localAccounts);
       return { synced: true, accounts: localAccounts, source: 'local' };
     }
@@ -442,6 +329,7 @@ export function updateAccountAdminStatus(
   syncToIndexedDB(updated);
 
   updateAccountAdminInSupabase(userId, isClassAdmin, promotedByName);
+  sendSupabaseHubBroadcast('AUTH_USER_CHANGE', { action: 'admin_updated', userId, isClassAdmin }).catch(() => {});
   return updated;
 }
 
@@ -455,6 +343,7 @@ export function updateAccountPin(userId: string, pin: string): AuthUser[] {
   syncToIndexedDB(updated);
 
   updateAccountPinInSupabase(userId, pin);
+  sendSupabaseHubBroadcast('AUTH_USER_CHANGE', { action: 'pin_updated', userId }).catch(() => {});
   return updated;
 }
 
