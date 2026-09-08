@@ -17,20 +17,51 @@ const STORAGE_SUPABASE_KEY_KEY = 'kch_custom_supabase_anon_key';
 export const DEFAULT_SUPABASE_URL = 'https://ifyhflqwdlgnqfryojxi.supabase.co';
 export const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_oOQnfQSz1hRmshsKyQK0WQ_vvtdldEO';
 
+/**
+ * Validates whether a given string is a valid Supabase API key (JWT or publishable token),
+ * and NOT a URL accidentally passed into the API key field.
+ */
+export function isLikelySupabaseKey(key: string): boolean {
+  if (!key) return false;
+  const trimmed = key.trim();
+  // If it starts with http, contains supabase.co, or contains /rest/ or /, it's a URL, not a key!
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return false;
+  if (trimmed.includes('supabase.co') || trimmed.includes('/rest/')) return false;
+  if (trimmed.includes('/') || trimmed.includes(':')) return false;
+  // Valid keys (JWT eyJ... or sb_publishable_... or standard token) are at least 20 chars
+  return trimmed.length >= 20;
+}
+
+/**
+ * Validates whether a given string is a Supabase HTTP(S) URL.
+ */
+export function isLikelySupabaseUrl(url: string): boolean {
+  if (!url) return false;
+  const trimmed = url.trim();
+  return trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.includes('.supabase.co');
+}
+
+/**
+ * Strips /rest/v1, trailing slashes, and paths so Supabase client gets the base origin URL
+ * e.g. "https://ifyhflqwdlgnqfryojxi.supabase.co/rest/v1/" -> "https://ifyhflqwdlgnqfryojxi.supabase.co"
+ */
 export function sanitizeSupabaseUrl(rawUrl: string): string {
   if (!rawUrl) return '';
   let url = rawUrl.trim();
-  // Strip trailing /rest/v1 or /rest/v1/ if user pasted full REST endpoint
-  url = url.replace(/\/rest\/v1\/?$/, '');
-  // Strip trailing slashes
-  url = url.replace(/\/+$/, '');
-  return url;
+  try {
+    const parsed = new URL(url);
+    return `${parsed.protocol}//${parsed.host}`;
+  } catch (e) {
+    url = url.replace(/\/rest\/v1\/?.*$/, '');
+    url = url.replace(/\/+$/, '');
+    return url;
+  }
 }
 
 /**
  * Resolve active Supabase URL & Anon Key:
- * 1. Environment variables (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY)
- * 2. In-app localStorage credentials entered by user
+ * 1. In-app localStorage credentials (with automatic validation and auto-correction)
+ * 2. Environment variables (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY)
  * 3. Default production CRC Kids Church Hub Supabase project
  */
 export function getSupabaseConfig(): {
@@ -48,14 +79,44 @@ export function getSupabaseConfig(): {
     try {
       customUrl = (localStorage.getItem(STORAGE_SUPABASE_URL_KEY) || '').trim();
       customKey = (localStorage.getItem(STORAGE_SUPABASE_KEY_KEY) || '').trim();
+
+      // Auto-detect and fix if user previously swapped URL and Key:
+      if (isLikelySupabaseKey(customUrl) && isLikelySupabaseUrl(customKey)) {
+        const temp = customUrl;
+        customUrl = customKey;
+        customKey = temp;
+        localStorage.setItem(STORAGE_SUPABASE_URL_KEY, sanitizeSupabaseUrl(customUrl));
+        localStorage.setItem(STORAGE_SUPABASE_KEY_KEY, customKey);
+      } else {
+        // Detect corrupt key (e.g. user pasted https://.../rest/v1/ into the API key field)
+        if (customKey && !isLikelySupabaseKey(customKey)) {
+          console.warn('[Supabase Config] Corrupted API key detected in localStorage (was a URL). Purging.');
+          localStorage.removeItem(STORAGE_SUPABASE_KEY_KEY);
+          customKey = '';
+        }
+        if (customUrl && !isLikelySupabaseUrl(customUrl)) {
+          console.warn('[Supabase Config] Corrupted URL detected in localStorage. Purging.');
+          localStorage.removeItem(STORAGE_SUPABASE_URL_KEY);
+          customUrl = '';
+        }
+      }
     } catch (e) {}
   }
 
-  const rawUrl = customUrl || envUrl || DEFAULT_SUPABASE_URL;
-  const anonKey = customKey || envKey || DEFAULT_SUPABASE_ANON_KEY;
+  const validEnvKey = isLikelySupabaseKey(envKey) ? envKey : '';
+  const validEnvUrl = isLikelySupabaseUrl(envUrl) ? envUrl : '';
+
+  const rawUrl = customUrl || validEnvUrl || DEFAULT_SUPABASE_URL;
+  let anonKey = customKey || validEnvKey || DEFAULT_SUPABASE_ANON_KEY;
+
+  // Guard against any corrupt anonKey value falling through
+  if (!isLikelySupabaseKey(anonKey)) {
+    anonKey = DEFAULT_SUPABASE_ANON_KEY;
+  }
+
   const url = sanitizeSupabaseUrl(rawUrl);
-  const isCustom = Boolean(customUrl && customKey);
-  const isConfigured = Boolean(url && anonKey && url.startsWith('http'));
+  const isCustom = Boolean(customUrl && customKey && isLikelySupabaseKey(customKey));
+  const isConfigured = Boolean(url && anonKey && url.startsWith('http') && isLikelySupabaseKey(anonKey));
 
   return {
     url,
@@ -67,15 +128,29 @@ export function getSupabaseConfig(): {
 
 export function saveCustomSupabaseConfig(url: string, anonKey: string): boolean {
   try {
-    const cleanUrl = sanitizeSupabaseUrl(url);
-    const cleanKey = anonKey.trim();
-    if (!cleanUrl || !cleanKey) return false;
+    let cleanUrl = (url || '').trim();
+    let cleanKey = (anonKey || '').trim();
+
+    // Auto-swap if accidentally inverted
+    if (isLikelySupabaseKey(cleanUrl) && isLikelySupabaseUrl(cleanKey)) {
+      const temp = cleanUrl;
+      cleanUrl = cleanKey;
+      cleanKey = temp;
+    }
+
+    cleanUrl = sanitizeSupabaseUrl(cleanUrl);
+
+    if (!cleanUrl || !cleanKey || !isLikelySupabaseKey(cleanKey)) {
+      console.warn('[Supabase Config] Invalid credentials passed to saveCustomSupabaseConfig');
+      return false;
+    }
 
     localStorage.setItem(STORAGE_SUPABASE_URL_KEY, cleanUrl);
     localStorage.setItem(STORAGE_SUPABASE_KEY_KEY, cleanKey);
     // Reset singleton instance so client recreates with new credentials
     supabaseInstance = null;
     hubChannelInstance = null;
+    accountsChannelInstance = null;
     return true;
   } catch (e) {
     console.warn('Failed to store custom Supabase config:', e);
@@ -89,6 +164,7 @@ export function clearCustomSupabaseConfig(): void {
     localStorage.removeItem(STORAGE_SUPABASE_KEY_KEY);
     supabaseInstance = null;
     hubChannelInstance = null;
+    accountsChannelInstance = null;
   } catch (e) {}
 }
 
@@ -104,6 +180,15 @@ export function getSupabaseClient(): SupabaseClient | null {
   const clientKey = `${url}::${anonKey}`;
   if (!supabaseInstance || currentClientKey !== clientKey) {
     try {
+      if (supabaseInstance && hubChannelInstance) {
+        try { supabaseInstance.removeChannel(hubChannelInstance); } catch (e) {}
+        hubChannelInstance = null;
+      }
+      if (supabaseInstance && accountsChannelInstance) {
+        try { supabaseInstance.removeChannel(accountsChannelInstance); } catch (e) {}
+        accountsChannelInstance = null;
+      }
+
       supabaseInstance = createClient(url, anonKey, {
         auth: {
           persistSession: false,
