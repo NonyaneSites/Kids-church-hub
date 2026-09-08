@@ -28,7 +28,8 @@ import {
   Crown,
   ShieldCheck,
   Database,
-  Lock
+  Lock,
+  RefreshCw
 } from 'lucide-react';
 import {
   AuthUser,
@@ -87,6 +88,8 @@ interface MobileAppViewProps {
   isEmergencyActive: boolean;
   onToggleEmergency: () => void;
   lessonNotes: string;
+  onSyncWithCloud?: () => Promise<any> | void;
+  isSyncingAccounts?: boolean;
 }
 
 export const MobileAppView: React.FC<MobileAppViewProps> = ({
@@ -119,6 +122,8 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
   isEmergencyActive,
   onToggleEmergency,
   lessonNotes,
+  onSyncWithCloud,
+  isSyncingAccounts = false,
 }) => {
   // Mobile Active Bottom Tab
   const [mobileTab, setMobileTab] = useState<'runsheet' | 'stage' | 'tech' | 'team'>('runsheet');
@@ -747,9 +752,25 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
 
             {/* List of Registered Accounts in Database with Working Delete */}
             <div className="space-y-2">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-gray-300 block">
-                Saved Database Staff Roster ({registeredAccounts.length})
-              </span>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-gray-300">
+                  Saved Database Staff Roster ({registeredAccounts.length})
+                </span>
+                {onSyncWithCloud && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onSyncWithCloud();
+                      showTemporaryNotice('Synced latest accounts with church cloud database.');
+                    }}
+                    disabled={isSyncingAccounts}
+                    className="flex items-center gap-1 text-[10px] text-purple-400 hover:text-purple-300 px-2 py-0.5 rounded-lg bg-white/5 hover:bg-white/10 transition-colors"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isSyncingAccounts ? 'animate-spin' : ''}`} />
+                    <span>Sync DB</span>
+                  </button>
+                )}
+              </div>
 
               {registeredAccounts.map((account) => {
                 const isCurrent = authUser.id === account.id;

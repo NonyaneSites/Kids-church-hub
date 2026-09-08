@@ -81,10 +81,10 @@ export async function syncToIndexedDB(accounts: AuthUser[]): Promise<void> {
 
 /**
  * Retrieve accounts list from the database.
+ * Returns whatever is in persistent storage without auto-injecting demo seeds.
  */
 export function dbGetAccounts(): AuthUser[] {
   try {
-    const isCleared = localStorage.getItem(LOCAL_STORAGE_CLEARED_FLAG) === 'true';
     const raw = localStorage.getItem(LOCAL_STORAGE_ACCOUNTS_KEY);
 
     let accounts: AuthUser[] = [];
@@ -94,11 +94,6 @@ export function dbGetAccounts(): AuthUser[] {
       if (Array.isArray(parsed)) {
         accounts = parsed;
       }
-    } else if (!isCleared) {
-      // First boot: populate with initial preconfigured staff
-      accounts = [...PRECONFIGURED_USERS];
-      localStorage.setItem(LOCAL_STORAGE_ACCOUNTS_KEY, JSON.stringify(accounts));
-      syncToIndexedDB(accounts);
     }
 
     return accounts;
@@ -131,8 +126,11 @@ export function dbSaveAccount(user: AuthUser): AuthUser[] {
       }
     });
 
-    // Broadcast account update across real-time network
-    sendSupabaseHubBroadcast('AUTH_USER_CHANGE', { action: 'saved', user }).catch(() => {});
+    // Broadcast account update across real-time network with normalized structure
+    sendSupabaseHubBroadcast('AUTH_USER_CHANGE', {
+      event: 'AUTH_USER_CHANGE',
+      payload: { action: 'saved', user },
+    }).catch(() => {});
 
     return updated;
   } catch (e) {
@@ -164,8 +162,11 @@ export function dbDeleteAccount(userId: string): AuthUser[] {
       }
     });
 
-    // Broadcast deletion across all connected devices
-    sendSupabaseHubBroadcast('AUTH_USER_CHANGE', { action: 'deleted', deletedId: userId }).catch(() => {});
+    // Broadcast deletion across all connected devices with normalized structure
+    sendSupabaseHubBroadcast('AUTH_USER_CHANGE', {
+      event: 'AUTH_USER_CHANGE',
+      payload: { action: 'deleted', deletedId: userId },
+    }).catch(() => {});
 
     return updated;
   } catch (e) {
@@ -179,7 +180,7 @@ export function dbDeleteAccount(userId: string): AuthUser[] {
  */
 export function dbSyncRemoteAccounts(remoteAccounts: AuthUser[]): AuthUser[] {
   try {
-    if (!Array.isArray(remoteAccounts) || remoteAccounts.length === 0) {
+    if (!Array.isArray(remoteAccounts)) {
       return dbGetAccounts();
     }
     
@@ -214,7 +215,10 @@ export function dbClearDefaultAccounts(): AuthUser[] {
     localStorage.setItem(LOCAL_STORAGE_ACCOUNTS_KEY, JSON.stringify(remaining));
     syncToIndexedDB(remaining);
 
-    sendSupabaseHubBroadcast('AUTH_USER_CHANGE', { action: 'cleared_defaults', remaining }).catch(() => {});
+    sendSupabaseHubBroadcast('AUTH_USER_CHANGE', {
+      event: 'AUTH_USER_CHANGE',
+      payload: { action: 'cleared_defaults', remaining },
+    }).catch(() => {});
 
     return remaining;
   } catch (e) {
@@ -235,7 +239,10 @@ export function dbResetDefaultAccounts(): AuthUser[] {
     // Push seed accounts to Supabase
     syncAllAccountsToSupabase(PRECONFIGURED_USERS);
 
-    sendSupabaseHubBroadcast('AUTH_USER_CHANGE', { action: 'reset_defaults', accounts: PRECONFIGURED_USERS }).catch(() => {});
+    sendSupabaseHubBroadcast('AUTH_USER_CHANGE', {
+      event: 'AUTH_USER_CHANGE',
+      payload: { action: 'reset_defaults', accounts: PRECONFIGURED_USERS },
+    }).catch(() => {});
 
     return PRECONFIGURED_USERS;
   } catch (e) {
@@ -247,7 +254,8 @@ export function dbResetDefaultAccounts(): AuthUser[] {
 /**
  * Server-authoritative sync between local storage and Supabase:
  * Remote Supabase is the single source of truth.
- * Never re-upload an account that is missing from remote.
+ * Whatever is in Supabase (1 account, 0 accounts, or N accounts) is mirrored to local storage.
+ * Never re-uploads deleted or local dummy accounts.
  */
 export async function dbSyncWithSupabase(): Promise<{
   synced: boolean;
@@ -260,22 +268,15 @@ export async function dbSyncWithSupabase(): Promise<{
 
   try {
     const remoteAccounts = await fetchAccountsFromSupabase();
-    const localAccounts = dbGetAccounts();
 
-    // 1. If remote Supabase returned accounts, remote is authoritative
-    if (remoteAccounts && remoteAccounts.length > 0) {
+    // If remote Supabase returned data (an array), it is strictly authoritative
+    if (remoteAccounts !== null && Array.isArray(remoteAccounts)) {
       localStorage.setItem(LOCAL_STORAGE_ACCOUNTS_KEY, JSON.stringify(remoteAccounts));
       syncToIndexedDB(remoteAccounts);
       return { synced: true, accounts: remoteAccounts, source: 'supabase' };
     } 
-    
-    // 2. If remote table exists but has 0 records and local has seed/accounts, seed remote
-    if (remoteAccounts && remoteAccounts.length === 0 && localAccounts.length > 0) {
-      await syncAllAccountsToSupabase(localAccounts);
-      return { synced: true, accounts: localAccounts, source: 'local' };
-    }
 
-    return { synced: false, accounts: localAccounts, source: 'local' };
+    return { synced: false, accounts: dbGetAccounts(), source: 'local' };
   } catch (e) {
     console.warn('Supabase sync error:', e);
     return { synced: false, accounts: dbGetAccounts(), source: 'local' };
@@ -329,7 +330,10 @@ export function updateAccountAdminStatus(
   syncToIndexedDB(updated);
 
   updateAccountAdminInSupabase(userId, isClassAdmin, promotedByName);
-  sendSupabaseHubBroadcast('AUTH_USER_CHANGE', { action: 'admin_updated', userId, isClassAdmin }).catch(() => {});
+  sendSupabaseHubBroadcast('AUTH_USER_CHANGE', {
+    event: 'AUTH_USER_CHANGE',
+    payload: { action: 'admin_updated', userId, isClassAdmin },
+  }).catch(() => {});
   return updated;
 }
 
@@ -343,7 +347,10 @@ export function updateAccountPin(userId: string, pin: string): AuthUser[] {
   syncToIndexedDB(updated);
 
   updateAccountPinInSupabase(userId, pin);
-  sendSupabaseHubBroadcast('AUTH_USER_CHANGE', { action: 'pin_updated', userId }).catch(() => {});
+  sendSupabaseHubBroadcast('AUTH_USER_CHANGE', {
+    event: 'AUTH_USER_CHANGE',
+    payload: { action: 'pin_updated', userId },
+  }).catch(() => {});
   return updated;
 }
 

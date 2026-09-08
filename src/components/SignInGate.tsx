@@ -21,7 +21,8 @@ import {
   ChevronLeft,
   Copy,
   Eye,
-  EyeOff
+  EyeOff,
+  RefreshCw
 } from 'lucide-react';
 import { AuthUser, Role, ClassId } from '../types/hub';
 import { CLASSES_CONFIG } from '../data/classHubsData';
@@ -31,12 +32,16 @@ interface SignInGateProps {
   onSignIn: (user: AuthUser) => void;
   registeredAccounts: AuthUser[];
   onAddNewAccount?: (newUser: AuthUser) => void;
+  isSyncing?: boolean;
+  onRefreshAccounts?: () => void;
 }
 
 export const SignInGate: React.FC<SignInGateProps> = ({
   onSignIn,
   registeredAccounts = [],
   onAddNewAccount,
+  isSyncing = false,
+  onRefreshAccounts,
 }) => {
   const [selectedAccount, setSelectedAccount] = useState<AuthUser | null>(null);
   const [authMethod, setAuthMethod] = useState<'pin' | 'otp'>('pin');
@@ -566,89 +571,120 @@ export const SignInGate: React.FC<SignInGateProps> = ({
             {activeMode === 'accounts' && (
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-gray-400 px-1">
-                  <span>Select Profile to Authenticate:</span>
-                  <span className="text-[10px] text-purple-400 font-normal">PIN or OTP required</span>
+                  <div className="flex items-center gap-1.5">
+                    <span>Select Profile to Authenticate:</span>
+                    {onRefreshAccounts && (
+                      <button
+                        type="button"
+                        onClick={onRefreshAccounts}
+                        disabled={isSyncing}
+                        className="p-1 text-purple-400 hover:text-purple-300 hover:bg-white/5 rounded-lg transition-colors"
+                        title="Sync with cloud database"
+                      >
+                        <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`} />
+                      </button>
+                    )}
+                  </div>
+                  <span className="text-[10px] text-purple-400 font-normal">
+                    {isSyncing ? 'Connecting to Cloud...' : 'PIN or OTP required'}
+                  </span>
                 </div>
                 
                 <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
-                  {filteredAccounts.map((account) => {
-                    const isDirector = account.role === 'director' || (account.role === 'admin' && account.assignedClassId === 'all');
-                    const isClassAdmin = account.isClassAdmin || (account.role === 'admin' && account.assignedClassId !== 'all');
-
-                    return (
-                      <button
-                        key={account.id}
-                        onClick={() => handleSelectAccountForAuth(account)}
-                        className={`w-full p-3 rounded-2xl border text-left transition-all flex items-center justify-between group ${
-                          isDirector
-                            ? 'bg-amber-950/20 hover:bg-amber-950/40 border-amber-500/30 hover:border-amber-400'
-                            : isClassAdmin
-                            ? 'bg-purple-950/20 hover:bg-purple-950/40 border-purple-500/30 hover:border-purple-400'
-                            : 'bg-white/5 hover:bg-white/10 border-white/5 hover:border-white/20'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${account.avatarColor || 'from-purple-600 to-indigo-600'} text-white font-black flex items-center justify-center text-sm shadow-md shrink-0`}>
-                            {account.name.charAt(0).toUpperCase()}
-                          </div>
-                          
-                          <div>
-                            <div className="text-xs font-bold text-white group-hover:text-purple-300 transition-colors flex items-center gap-2 flex-wrap">
-                              <span>{account.name}</span>
-                              
-                              {/* Distinction Badges */}
-                              {isDirector ? (
-                                <span className="px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/50 flex items-center gap-0.5">
-                                  <Crown className="w-2.5 h-2.5 text-amber-400" />
-                                  <span>DIRECTOR</span>
-                                </span>
-                              ) : isClassAdmin ? (
-                                <span className="px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-purple-500/20 text-purple-300 border border-purple-500/50 flex items-center gap-0.5">
-                                  <ShieldCheck className="w-2.5 h-2.5 text-purple-400" />
-                                  <span>CLASS ADMIN</span>
-                                </span>
-                              ) : null}
-                            </div>
-                            
-                            <div className="text-[11px] text-gray-400">
-                              {account.roleTitle || account.role}
-                            </div>
-                            
-                            <div className="flex items-center gap-2 mt-1 flex-wrap">
-                              {getClassBadge(account.assignedClassId)}
-                              {account.phone && (
-                                <span className="text-[10px] text-gray-400 font-mono">
-                                  {account.phone}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="text-right shrink-0">
-                          <span className="text-xs font-bold text-purple-400 group-hover:translate-x-0.5 transition-transform inline-flex items-center gap-1">
-                            <span>Authenticate</span>
-                            <span>&rarr;</span>
-                          </span>
-                          <div className="text-[9px] text-gray-400 font-mono mt-0.5 flex items-center justify-end gap-1">
-                            <Lock className="w-2.5 h-2.5 text-purple-400" />
-                            <span>Protected</span>
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                  {filteredAccounts.length === 0 && (
-                    <div className="text-center py-8 px-4 bg-white/5 rounded-2xl border border-white/5 space-y-3">
-                      <p className="text-xs text-gray-400">No accounts currently in this list.</p>
-                      <button
-                        type="button"
-                        onClick={handleGuestSignIn}
-                        className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-xl"
-                      >
-                        Continue with Fast Pass
-                      </button>
+                  {isSyncing && registeredAccounts.length === 0 ? (
+                    <div className="text-center py-10 px-4 bg-white/5 rounded-2xl border border-white/5 space-y-3">
+                      <RefreshCw className="w-6 h-6 text-purple-400 animate-spin mx-auto" />
+                      <div className="text-xs font-bold text-white">Connecting to Church Database...</div>
+                      <div className="text-[11px] text-gray-400">Loading verified staff accounts from Supabase cloud</div>
                     </div>
+                  ) : filteredAccounts.length === 0 ? (
+                    <div className="text-center py-8 px-4 bg-white/5 rounded-2xl border border-white/5 space-y-3">
+                      <p className="text-xs text-gray-400">No staff accounts found in this category.</p>
+                      <div className="flex items-center justify-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setActiveMode('register')}
+                          className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-xl transition-all"
+                        >
+                          Register Staff Account
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleGuestSignIn}
+                          className="px-3 py-2 bg-white/10 hover:bg-white/20 text-gray-200 font-bold text-xs rounded-xl transition-all"
+                        >
+                          Fast Pass
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    filteredAccounts.map((account) => {
+                      const isDirector = account.role === 'director' || (account.role === 'admin' && account.assignedClassId === 'all');
+                      const isClassAdmin = account.isClassAdmin || (account.role === 'admin' && account.assignedClassId !== 'all');
+
+                      return (
+                        <button
+                          key={account.id}
+                          onClick={() => handleSelectAccountForAuth(account)}
+                          className={`w-full p-3 rounded-2xl border text-left transition-all flex items-center justify-between group ${
+                            isDirector
+                              ? 'bg-amber-950/20 hover:bg-amber-950/40 border-amber-500/30 hover:border-amber-400'
+                              : isClassAdmin
+                              ? 'bg-purple-950/20 hover:bg-purple-950/40 border-purple-500/30 hover:border-purple-400'
+                              : 'bg-white/5 hover:bg-white/10 border-white/5 hover:border-white/20'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${account.avatarColor || 'from-purple-600 to-indigo-600'} text-white font-black flex items-center justify-center text-sm shadow-md shrink-0`}>
+                              {account.name.charAt(0).toUpperCase()}
+                            </div>
+                            
+                            <div>
+                              <div className="text-xs font-bold text-white group-hover:text-purple-300 transition-colors flex items-center gap-2 flex-wrap">
+                                <span>{account.name}</span>
+                                
+                                {/* Distinction Badges */}
+                                {isDirector ? (
+                                  <span className="px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/50 flex items-center gap-0.5">
+                                    <Crown className="w-2.5 h-2.5 text-amber-400" />
+                                    <span>DIRECTOR</span>
+                                  </span>
+                                ) : isClassAdmin ? (
+                                  <span className="px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-purple-500/20 text-purple-300 border border-purple-500/50 flex items-center gap-0.5">
+                                    <ShieldCheck className="w-2.5 h-2.5 text-purple-400" />
+                                    <span>CLASS ADMIN</span>
+                                  </span>
+                                ) : null}
+                              </div>
+                              
+                              <div className="text-[11px] text-gray-400">
+                                {account.roleTitle || account.role}
+                              </div>
+                              
+                              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                {getClassBadge(account.assignedClassId)}
+                                {account.phone && (
+                                  <span className="text-[10px] text-gray-400 font-mono">
+                                    {account.phone}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="text-right shrink-0">
+                            <span className="text-xs font-bold text-purple-400 group-hover:translate-x-0.5 transition-transform inline-flex items-center gap-1">
+                              <span>Authenticate</span>
+                              <span>&rarr;</span>
+                            </span>
+                            <div className="text-[9px] text-gray-400 font-mono mt-0.5 flex items-center justify-end gap-1">
+                              <Lock className="w-2.5 h-2.5 text-purple-400" />
+                              <span>Protected</span>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })
                   )}
                 </div>
               </div>

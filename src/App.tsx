@@ -113,6 +113,7 @@ export default function App() {
     allClassesConfig,
     allClassHubs,
     registeredAccounts,
+    isSyncingAccounts,
     addNewAccount,
     deleteUserAccount,
     clearAllDefaultAccounts,
@@ -182,6 +183,8 @@ export default function App() {
         }}
         registeredAccounts={registeredAccounts}
         onAddNewAccount={addNewAccount}
+        isSyncing={isSyncingAccounts}
+        onRefreshAccounts={syncAccountsWithCloud}
       />
     );
   }
@@ -223,6 +226,8 @@ export default function App() {
           onDeleteAccount={deleteUserAccount}
           onClearDefaultAccounts={clearAllDefaultAccounts}
           onResetDefaultAccounts={resetDefaultAccounts}
+          onSyncWithCloud={syncAccountsWithCloud}
+          isSyncingAccounts={isSyncingAccounts}
           onPromoteToClassAdmin={promoteToClassAdmin}
           onRevokeClassAdmin={revokeClassAdmin}
           onSwitchUser={switchAuthUser}

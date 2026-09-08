@@ -115,6 +115,7 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
 
   // Registered Accounts State (Supabase / Local DB)
   const [registeredAccounts, setRegisteredAccounts] = useState<AuthUser[]>(() => getStoredAccountsList());
+  const [isSyncingAccounts, setIsSyncingAccounts] = useState<boolean>(true);
 
   // Multi-Class Hubs Master State
   const [allClassHubs, setAllClassHubs] = useState<Record<ClassId, ClassHubData>>(() => {
@@ -577,9 +578,28 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
   // Connect to Supabase Realtime Broadcast Channel for true multi-device synchronization
   useEffect(() => {
     const unsubscribeHub = subscribeToSupabaseHubBroadcast((message) => {
-      const data = message.payload as BroadcastChannelEvent;
-      if (data && data.senderId !== clientIdRef.current) {
-        handleIncomingBroadcast(data);
+      const rawPayload = message?.payload as any;
+      const eventName = rawPayload?.event || message?.event;
+      const senderId = rawPayload?.senderId;
+
+      // Ignore echoes from ourselves
+      if (senderId && senderId === clientIdRef.current) {
+        return;
+      }
+
+      // Handle payload whether wrapped in BroadcastChannelEvent or sent as direct payload
+      const eventPayload = rawPayload?.payload !== undefined ? rawPayload.payload : rawPayload;
+
+      const normalizedEvent: BroadcastChannelEvent = {
+        type: 'broadcast',
+        event: eventName,
+        payload: eventPayload,
+        sentAt: rawPayload?.sentAt || new Date().toISOString(),
+        senderId: senderId || 'remote-peer',
+      };
+
+      if (normalizedEvent.event) {
+        handleIncomingBroadcast(normalizedEvent);
       }
     });
 
@@ -1096,17 +1116,26 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
   // Supabase cloud sync & realtime listener for staff accounts
   useEffect(() => {
     let isMounted = true;
+    setIsSyncingAccounts(true);
 
-    // 1. Initial background sync
-    dbSyncWithSupabase().then((res) => {
-      if (isMounted && res.synced && res.accounts.length > 0) {
-        setRegisteredAccounts(res.accounts);
-      }
-    });
+    // 1. Initial authoritative sync directly from Supabase
+    dbSyncWithSupabase()
+      .then((res) => {
+        if (isMounted) {
+          setIsSyncingAccounts(false);
+          if (res.synced) {
+            setRegisteredAccounts(res.accounts);
+          }
+        }
+      })
+      .catch((err) => {
+        console.warn('Initial cloud accounts sync error:', err);
+        if (isMounted) setIsSyncingAccounts(false);
+      });
 
-    // 2. Realtime listener for accounts table changes
+    // 2. Realtime listener for accounts table changes (cross-device adds/deletes/promotions)
     const unsubscribe = subscribeToSupabaseAccounts((updatedAccounts) => {
-      if (isMounted && Array.isArray(updatedAccounts) && updatedAccounts.length > 0) {
+      if (isMounted && Array.isArray(updatedAccounts)) {
         const merged = dbSyncRemoteAccounts(updatedAccounts);
         setRegisteredAccounts(merged);
       }
@@ -1119,12 +1148,20 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
   }, []);
 
   const syncAccountsWithCloud = useCallback(async () => {
-    const res = await dbSyncWithSupabase();
-    if (res.synced && res.accounts.length > 0) {
-      setRegisteredAccounts(res.accounts);
+    setIsSyncingAccounts(true);
+    try {
+      const res = await dbSyncWithSupabase();
+      if (res.synced) {
+        setRegisteredAccounts(res.accounts);
+      }
+      return res;
+    } catch (e) {
+      console.warn('Cloud sync error:', e);
+      return { synced: false, accounts: registeredAccounts, source: 'local' as const };
+    } finally {
+      setIsSyncingAccounts(false);
     }
-    return res;
-  }, []);
+  }, [registeredAccounts]);
 
   const removeTeamMember = useCallback((memberId: string) => {
     const isDirector = authUser.role === 'director' || (authUser.role === 'admin' && authUser.assignedClassId === 'all');
@@ -1781,6 +1818,7 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
     allClassesConfig: CLASSES_CONFIG,
     allClassHubs,
     registeredAccounts,
+    isSyncingAccounts,
     addNewAccount,
     deleteUserAccount,
     clearAllDefaultAccounts,
