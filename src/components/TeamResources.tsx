@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Users,
   BookOpen,
@@ -68,6 +68,48 @@ export const TeamResources: React.FC<TeamResourcesProps> = ({
 
   const isDirector = currentUser?.role === 'director' || (currentUser?.role === 'admin' && currentUser?.assignedClassId === 'all') || Boolean(currentUser?.isOverallAdmin);
   const isClassAdmin = isDirector || Boolean(currentUser?.isClassAdmin) || (currentUser?.role === 'admin') || (currentUser?.role as string) === 'class-admin';
+
+  // Unified Class Roster:
+  // All accounts registered under this class (or directors with global access)
+  // PLUS all custom/seeded team members in this class hub!
+  const effectiveClassRoster = useMemo(() => {
+    const currentClass = selectedClassId || 'all';
+
+    // 1. Accounts registered under this class
+    const accountsForClass = registeredAccounts.filter((acc) => {
+      if (currentClass === 'all') return true;
+      return acc.assignedClassId === currentClass || acc.assignedClassId === 'all';
+    });
+
+    const accountRosterItems: (TeamMember & { isRegisteredAccount: boolean; accountRef?: AuthUser })[] = accountsForClass.map((acc) => ({
+      id: acc.id,
+      name: acc.name,
+      roleTitle: acc.roleTitle || (acc.role === 'director' ? 'Ministry Director' : acc.isClassAdmin ? 'Class Admin' : acc.role === 'tech' ? 'Technical Lead' : acc.role === 'presenter' ? 'Lead Presenter' : 'Comms Lead'),
+      roleType: acc.role,
+      avatarColor: acc.avatarColor || 'from-purple-500 to-indigo-600',
+      isOnline: true,
+      phone: acc.phone,
+      isRegisteredAccount: true,
+      accountRef: acc,
+    }));
+
+    // 2. Add team members from this class hub that aren't already represented by an account
+    const merged = [...accountRosterItems];
+    teamMembers.forEach((member) => {
+      const exists = merged.some(
+        (m) => m.id === member.id || m.name.trim().toLowerCase() === member.name.trim().toLowerCase()
+      );
+      if (!exists) {
+        merged.push({
+          ...member,
+          isRegisteredAccount: false,
+          accountRef: undefined,
+        });
+      }
+    });
+
+    return merged;
+  }, [registeredAccounts, selectedClassId, teamMembers]);
 
   const showTemporaryNotice = (msg: string) => {
     setActionNotice(msg);
@@ -307,7 +349,7 @@ export const TeamResources: React.FC<TeamResourcesProps> = ({
                 rosterFilter === 'class' ? 'bg-purple-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'
               }`}
             >
-              {activeClassInfo ? activeClassInfo.name : 'Class Team'}
+              {activeClassInfo ? activeClassInfo.name : 'Class Team'} ({effectiveClassRoster.length})
             </button>
             <button
               onClick={() => setRosterFilter('all')}
@@ -321,12 +363,12 @@ export const TeamResources: React.FC<TeamResourcesProps> = ({
 
           <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
             {rosterFilter === 'class' ? (
-              teamMembers.length === 0 ? (
+              effectiveClassRoster.length === 0 ? (
                 <div className="text-center py-8 text-gray-500 text-xs">
-                  No volunteers currently assigned to this class roster.
+                  No volunteers or registered accounts currently assigned to this class roster.
                 </div>
               ) : (
-                teamMembers.map((member) => {
+                effectiveClassRoster.map((member) => {
                   const canRemoveMember = isDirector || (isClassAdmin && currentUser?.assignedClassId === (selectedClassId || 'all'));
 
                   return (
@@ -339,10 +381,15 @@ export const TeamResources: React.FC<TeamResourcesProps> = ({
                           {member.name.substring(0, 2).toUpperCase()}
                         </div>
                         <div>
-                          <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
+                          <h4 className="text-xs font-bold text-white flex items-center gap-1.5 flex-wrap">
                             <span>{member.name}</span>
                             {member.isOnline && (
                               <span className="w-1.5 h-1.5 rounded-full bg-green-400" title="Online"></span>
+                            )}
+                            {member.isRegisteredAccount && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-bold border border-purple-500/30 uppercase">
+                                Registered
+                              </span>
                             )}
                           </h4>
                           <p className="text-[11px] text-gray-400">{member.roleTitle}</p>
@@ -360,13 +407,19 @@ export const TeamResources: React.FC<TeamResourcesProps> = ({
                           </a>
                         )}
 
-                        {/* Working Remove Button with Admin permissions */}
+                        {/* Working Remove / Delete Button with Admin permissions */}
                         {canRemoveMember ? (
                           <button
                             type="button"
-                            onClick={() => handleRemoveMemberClick(member)}
+                            onClick={() => {
+                              if (member.isRegisteredAccount && member.accountRef) {
+                                handleDeleteAccountClick(member.accountRef);
+                              } else {
+                                handleRemoveMemberClick(member);
+                              }
+                            }}
                             className="p-1.5 rounded-lg bg-red-600/20 hover:bg-red-600 text-red-300 hover:text-white border border-red-500/30 transition-colors"
-                            title={`Remove ${member.name} from class roster`}
+                            title={member.isRegisteredAccount ? `Delete account for ${member.name}` : `Remove ${member.name} from class roster`}
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>

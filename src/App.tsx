@@ -16,6 +16,7 @@ import { IncidentRealtimeToast } from './components/IncidentRealtimeToast';
 import { ServiceTemplateEditor } from './components/ServiceTemplateEditor';
 import { DirectorComposeModal } from './components/DirectorAnnouncementPopup';
 import { FullScreenMessageTakeover } from './components/FullScreenMessageTakeover';
+import { UrgentAcknowledgmentBanner } from './components/UrgentAcknowledgmentBanner';
 import { 
   ShieldAlert, 
   Sparkles, 
@@ -121,7 +122,10 @@ export default function App() {
     removeTeamMember,
     activeDirectorAnnouncement,
     sendDirectorAnnouncement,
+    acknowledgeDirectorAnnouncement,
     dismissDirectorAnnouncement,
+    sentUrgentTracker,
+    dismissSentUrgentTracker,
     broadcastCueToAllClasses,
     sendCueToClass,
   } = useServiceSync(activeRole);
@@ -504,10 +508,17 @@ export default function App() {
         initialTab={authModalInitialTab}
       />
 
+      {/* Urgent Message Acknowledgment Tracker (Live delivery confirmation for sender) */}
+      <UrgentAcknowledgmentBanner
+        tracker={sentUrgentTracker}
+        onDismiss={dismissSentUrgentTracker}
+      />
+
       {/* Full-Screen Message & Emergency Takeover (Guaranteed unmissable across whole screen) */}
       <FullScreenMessageTakeover
         directorAnnouncement={activeDirectorAnnouncement}
         onDismissDirectorAnnouncement={dismissDirectorAnnouncement}
+        onAcknowledgeDirectorAnnouncement={acknowledgeDirectorAnnouncement}
         emergencyAlerts={commsEmergencyAlerts}
         onAcknowledgeEmergencyAlert={acknowledgeCommsEmergency}
         isEmergencyActive={serviceState.isEmergencyActive}

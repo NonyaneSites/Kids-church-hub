@@ -20,6 +20,7 @@ export interface FullScreenMessageTakeoverProps {
   // Director broadcast announcement
   directorAnnouncement: DirectorAnnouncement | null;
   onDismissDirectorAnnouncement: () => void;
+  onAcknowledgeDirectorAnnouncement?: (id: string) => void;
 
   // Comms Emergency alert
   emergencyAlerts?: CommsEmergencyAlert[];
@@ -46,6 +47,7 @@ export interface FullScreenMessageTakeoverProps {
 export const FullScreenMessageTakeover: React.FC<FullScreenMessageTakeoverProps> = ({
   directorAnnouncement,
   onDismissDirectorAnnouncement,
+  onAcknowledgeDirectorAnnouncement,
   emergencyAlerts = [],
   onAcknowledgeEmergencyAlert,
   isEmergencyActive = false,
@@ -61,10 +63,22 @@ export const FullScreenMessageTakeover: React.FC<FullScreenMessageTakeoverProps>
   isOverallAdmin = false,
 }) => {
   // 1. Determine which message is active (Priorities: Emergency > Director Announcement > Urgent Stage Cue)
-  const activeCommsEmergency = emergencyAlerts.find(a => !a.acknowledged);
+  const activeCommsEmergency = emergencyAlerts.find(a => {
+    if (a.acknowledged) return false;
+    const isSender = Boolean(currentUserId && (a.senderId === currentUserId || (currentUserName && a.senderName.includes(currentUserName))));
+    if (isSender) return false;
+    return true;
+  });
 
-  // Check if director announcement is intended for this station/user
-  const isAnnouncementForUs = directorAnnouncement ? (
+  // Check if current user is the sender of the director announcement
+  const isSenderOfAnnouncement = Boolean(
+    directorAnnouncement &&
+    currentUserId &&
+    (directorAnnouncement.senderId === currentUserId || (currentUserName && directorAnnouncement.senderName.includes(currentUserName)))
+  );
+
+  // Check if director announcement is intended for this station/user AND recipient is NOT the sender
+  const isAnnouncementForUs = (directorAnnouncement && !isSenderOfAnnouncement) ? (
     directorAnnouncement.targetClassId === 'all' ||
     directorAnnouncement.targetClassId === selectedClassId ||
     isOverallAdmin ||
@@ -77,8 +91,9 @@ export const FullScreenMessageTakeover: React.FC<FullScreenMessageTakeoverProps>
   const activeUrgentCue = urgentCues.find(cue => {
     const isUrgent = cue.priority === 'urgent' || cue.priority === 'emergency';
     const isTargetClass = !cue.targetClassId || cue.targetClassId === 'all' || cue.targetClassId === selectedClassId;
+    const isSender = Boolean(currentUserId && (cue.senderId === currentUserId || (currentUserName && cue.senderName.includes(currentUserName))));
     const hasCopied = cue.copies?.some(c => c.userId === currentUserId);
-    return isUrgent && isTargetClass && !hasCopied;
+    return isUrgent && isTargetClass && !isSender && !hasCopied;
   });
 
   // Determine active takeover mode
@@ -108,11 +123,15 @@ export const FullScreenMessageTakeover: React.FC<FullScreenMessageTakeoverProps>
     if (!isTakeoverActive) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' || e.key === 'Enter') {
+      if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') {
         if (activeCommsEmergency && onAcknowledgeEmergencyAlert) {
           onAcknowledgeEmergencyAlert(activeCommsEmergency.id);
         } else if (validDirectorAnnouncement) {
-          onDismissDirectorAnnouncement();
+          if (onAcknowledgeDirectorAnnouncement) {
+            onAcknowledgeDirectorAnnouncement(validDirectorAnnouncement.id);
+          } else {
+            onDismissDirectorAnnouncement();
+          }
         } else if (activeUrgentCue && onCopyCue) {
           onCopyCue(activeUrgentCue.id);
         } else if (isEmergencyActive && onClearEmergency && isOverallAdmin) {
@@ -131,6 +150,7 @@ export const FullScreenMessageTakeover: React.FC<FullScreenMessageTakeoverProps>
     isEmergencyActive, 
     onAcknowledgeEmergencyAlert, 
     onDismissDirectorAnnouncement, 
+    onAcknowledgeDirectorAnnouncement,
     onCopyCue, 
     onClearEmergency, 
     isOverallAdmin
@@ -378,11 +398,17 @@ export const FullScreenMessageTakeover: React.FC<FullScreenMessageTakeoverProps>
 
           <button
             id="btn-ack-director-announcement"
-            onClick={onDismissDirectorAnnouncement}
+            onClick={() => {
+              if (onAcknowledgeDirectorAnnouncement) {
+                onAcknowledgeDirectorAnnouncement(validDirectorAnnouncement.id);
+              } else {
+                onDismissDirectorAnnouncement();
+              }
+            }}
             className="w-full sm:w-auto px-8 sm:px-12 py-4 sm:py-5 rounded-2xl bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-600 hover:from-purple-500 hover:to-indigo-500 text-white font-black text-base sm:text-lg uppercase tracking-wider shadow-[0_0_40px_rgba(168,85,247,0.6)] transition-all active:scale-95 flex items-center justify-center gap-3"
           >
             <CheckCircle2 className="w-6 h-6" />
-            <span>Acknowledge & Close</span>
+            <span>I Acknowledge (Copy That)</span>
           </button>
         </footer>
       </div>

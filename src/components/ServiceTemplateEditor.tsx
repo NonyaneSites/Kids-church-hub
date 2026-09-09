@@ -27,19 +27,22 @@ import {
 import { 
   Role, 
   AuthUser, 
+  ClassId,
   ServiceTemplate, 
   ServiceTemplateSegment 
 } from '../types/hub';
+import { CLASSES_CONFIG } from '../data/classHubsData';
 import { AccessDeniedCard } from './AccessDeniedCard';
 
 interface ServiceTemplateEditorProps {
   currentUser: AuthUser;
   templates: ServiceTemplate[];
+  selectedClassId?: ClassId;
   onCreateTemplate: (template: Omit<ServiceTemplate, 'id' | 'createdAt' | 'updatedAt'>) => void;
   onUpdateTemplate: (id: string, updates: Partial<ServiceTemplate>) => void;
   onDeleteTemplate: (id: string) => void;
   onResetTemplates: () => void;
-  onApplyTemplateToLive: (templateId: string) => void;
+  onApplyTemplateToLive: (templateId: string, targetClassId?: ClassId | 'all') => void;
   onOpenAuthModal: () => void;
 }
 
@@ -74,6 +77,7 @@ const ROLES_LIST = ['Admin', 'Tech & Worship', 'Presenter', 'Host', 'Small Group
 export const ServiceTemplateEditor: React.FC<ServiceTemplateEditorProps> = ({
   currentUser,
   templates,
+  selectedClassId,
   onCreateTemplate,
   onUpdateTemplate,
   onDeleteTemplate,
@@ -81,11 +85,14 @@ export const ServiceTemplateEditor: React.FC<ServiceTemplateEditorProps> = ({
   onApplyTemplateToLive,
   onOpenAuthModal,
 }) => {
-  // If user is not admin, show Role Access Gate
-  if ((currentUser?.role || 'admin') !== 'admin') {
+  const isDirector = currentUser?.role === 'director' || (currentUser?.role === 'admin' && currentUser?.assignedClassId === 'all') || Boolean(currentUser?.isOverallAdmin);
+  const isClassAdmin = isDirector || Boolean(currentUser?.isClassAdmin) || currentUser?.role === 'admin' || (currentUser?.role as string) === 'class-admin';
+
+  // If user is neither director nor class admin, show Role Access Gate
+  if (!isDirector && !isClassAdmin) {
     return (
       <AccessDeniedCard
-        requiredRole="Admin"
+        requiredRole="Director or Class Admin"
         currentUser={currentUser || {
           id: 'usr-guest',
           email: 'guest@crc.church',
@@ -105,6 +112,8 @@ export const ServiceTemplateEditor: React.FC<ServiceTemplateEditorProps> = ({
   );
   const [filterCategory, setFilterCategory] = useState<string>('all');
   const [isCreatingNew, setIsCreatingNew] = useState(false);
+  const [isConfirmApplyModalOpen, setIsConfirmApplyModalOpen] = useState(false);
+  const [applyTargetClassId, setApplyTargetClassId] = useState<ClassId | 'all'>('all');
   const [successNotice, setSuccessNotice] = useState<string>('');
 
   // New Template Form State
@@ -112,6 +121,7 @@ export const ServiceTemplateEditor: React.FC<ServiceTemplateEditorProps> = ({
   const [newTmplDesc, setNewTmplDesc] = useState('');
   const [newTmplCategory, setNewTmplCategory] = useState<'sunday_regular' | 'conference' | 'family_service' | 'outreach' | 'custom'>('sunday_regular');
   const [newTmplDuration, setNewTmplDuration] = useState(75);
+  const [newTmplClassId, setNewTmplClassId] = useState<ClassId | 'all'>('all');
 
   const activeTemplate = templates.find((t) => t.id === selectedTemplateId) || templates[0];
 
@@ -195,12 +205,14 @@ export const ServiceTemplateEditor: React.FC<ServiceTemplateEditorProps> = ({
       targetDurationMinutes: newTmplDuration,
       isDefault: false,
       createdBy: currentUser.name || 'Admin',
+      targetClassId: newTmplClassId,
       segments: initialSegments,
     });
 
     setIsCreatingNew(false);
     setNewTmplName('');
     setNewTmplDesc('');
+    setNewTmplClassId('all');
     showToast(`Template "${newTmplName}" created in Postgres table!`);
   };
 
@@ -284,10 +296,23 @@ export const ServiceTemplateEditor: React.FC<ServiceTemplateEditorProps> = ({
     showToast('Segment duplicated');
   };
 
-  const handleApplyLive = () => {
+  const handleOpenApplyModal = () => {
     if (!activeTemplate) return;
-    onApplyTemplateToLive(activeTemplate.id);
-    showToast(`🚀 Live Service updated with "${activeTemplate.name}" template!`);
+    const initialTarget = activeTemplate.targetClassId || 
+      (selectedClassId && selectedClassId !== 'all' ? selectedClassId : 
+      (currentUser.assignedClassId && currentUser.assignedClassId !== 'all' ? currentUser.assignedClassId : 'all'));
+    setApplyTargetClassId(initialTarget);
+    setIsConfirmApplyModalOpen(true);
+  };
+
+  const handleConfirmApplyLive = () => {
+    if (!activeTemplate) return;
+    onApplyTemplateToLive(activeTemplate.id, applyTargetClassId);
+    setIsConfirmApplyModalOpen(false);
+    const targetName = applyTargetClassId === 'all' 
+      ? 'ALL 5 Classroom Hubs' 
+      : (CLASSES_CONFIG.find(c => c.id === applyTargetClassId)?.name || applyTargetClassId.toUpperCase());
+    showToast(`🚀 Live Service created & applied to ${targetName}!`);
   };
 
   return (
@@ -344,7 +369,7 @@ export const ServiceTemplateEditor: React.FC<ServiceTemplateEditorProps> = ({
 
           {activeTemplate && (
             <button
-              onClick={handleApplyLive}
+              onClick={handleOpenApplyModal}
               className="py-2.5 px-5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs flex items-center gap-2 shadow-[0_0_20px_rgba(16,185,129,0.4)] transition-all"
             >
               <Sparkles className="w-4 h-4 animate-spin text-amber-300" />
@@ -432,6 +457,24 @@ export const ServiceTemplateEditor: React.FC<ServiceTemplateEditorProps> = ({
                 </div>
               </div>
 
+              <div>
+                <label className="block text-[11px] font-bold text-gray-300 uppercase tracking-wider mb-1">
+                  Target Classroom Hub
+                </label>
+                <select
+                  value={newTmplClassId}
+                  onChange={(e) => setNewTmplClassId(e.target.value as any)}
+                  className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-xs text-white focus:outline-none focus:border-purple-500 font-semibold"
+                >
+                  <option value="all">🌟 All Classes (Global Multi-Room Template)</option>
+                  <option value="jy">🔵 Junior Youth (Ages 13-14) - Blue Class</option>
+                  <option value="tb">🌸 Truth Builders (Ages 10-12) - Pink Class</option>
+                  <option value="kb">🔴 Kingdom Builders (Ages 7-9) - Red Class</option>
+                  <option value="la-orange">🟠 Little Arrows Orange (Ages 4-6)</option>
+                  <option value="la-yellow">🟡 Little Arrows Yellow (Ages 2-3)</option>
+                </select>
+              </div>
+
               <div className="flex gap-2 pt-3 border-t border-white/5">
                 <button
                   type="button"
@@ -448,6 +491,75 @@ export const ServiceTemplateEditor: React.FC<ServiceTemplateEditorProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* APPLY TEMPLATE TO LIVE SERVICE MODAL */}
+      {isConfirmApplyModalOpen && activeTemplate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-[#161626] border border-white/15 rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl space-y-5">
+            <div className="flex items-center justify-between pb-3 border-b border-white/5">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-emerald-400" />
+                <span>Apply Template to Classroom Hub</span>
+              </h3>
+              <button
+                onClick={() => setIsConfirmApplyModalOpen(false)}
+                className="text-gray-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-white/5 border border-white/10 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-white">{activeTemplate.name}</span>
+                <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 rounded-full font-bold">
+                  {totalCalculatedMinutes} Mins • {activeTemplate.segments.length} Segments
+                </span>
+              </div>
+              <p className="text-[11px] text-gray-400">{activeTemplate.description}</p>
+            </div>
+
+            <div className="space-y-3">
+              <label className="block text-xs font-bold text-gray-200 uppercase tracking-wider">
+                Select Target Classroom Hub *
+              </label>
+              <select
+                value={applyTargetClassId}
+                onChange={(e) => setApplyTargetClassId(e.target.value as any)}
+                className="w-full px-4 py-3 bg-black/60 border border-purple-500/40 rounded-xl text-sm text-white focus:outline-none focus:border-purple-400 font-bold shadow-inner"
+              >
+                <option value="all">🌟 All 5 Classes (Simultaneous Multi-Room Launch)</option>
+                <option value="jy">🔵 Junior Youth (Ages 13-14) - Blue Class</option>
+                <option value="tb">🌸 Truth Builders (Ages 10-12) - Pink Class</option>
+                <option value="kb">🔴 Kingdom Builders (Ages 7-9) - Red Class</option>
+                <option value="la-orange">🟠 Little Arrows Orange (Ages 4-6)</option>
+                <option value="la-yellow">🟡 Little Arrows Yellow (Ages 2-3)</option>
+              </select>
+              <p className="text-[11px] text-gray-400">
+                The service timeline and all {activeTemplate.segments.length} segments will be immediately initialized for the selected class hub.
+              </p>
+            </div>
+
+            <div className="flex gap-2 pt-3 border-t border-white/5">
+              <button
+                type="button"
+                onClick={() => setIsConfirmApplyModalOpen(false)}
+                className="flex-1 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 text-xs font-bold transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmApplyLive}
+                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-black shadow-[0_0_20px_rgba(16,185,129,0.4)] transition-all flex items-center justify-center gap-1.5"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Launch Service</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -814,7 +926,7 @@ export const ServiceTemplateEditor: React.FC<ServiceTemplateEditorProps> = ({
                 </div>
 
                 <button
-                  onClick={handleApplyLive}
+                  onClick={handleOpenApplyModal}
                   className="w-full sm:w-auto py-2.5 px-6 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(16,185,129,0.3)] transition-all"
                 >
                   <Sparkles className="w-4 h-4 text-amber-300" />

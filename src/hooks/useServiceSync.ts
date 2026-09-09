@@ -28,6 +28,7 @@ import {
   CalendarEvent,
   QuickStagePreset,
   CommsEmergencyAlert,
+  SentUrgentTrackerItem,
 } from '../types/hub';
 import {
   getStoredAuthUser,
@@ -292,6 +293,19 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
   // Director Real-time Screen Pop-up Announcement State
   const [activeDirectorAnnouncement, setActiveDirectorAnnouncement] = useState<DirectorAnnouncement | null>(null);
 
+  // Live Acknowledgment Tracker State (For Sender's Live Confirmation Tracking)
+  const [sentUrgentTracker, setSentUrgentTracker] = useState<SentUrgentTrackerItem | null>(null);
+  const dismissSentUrgentTracker = useCallback(() => setSentUrgentTracker(null), []);
+
+  // Hub Modification Authorization Guard (Directors = Global, Class Admins = Assigned Class Only)
+  const canModifyHub = useCallback((targetHubClassId: ClassId | 'all'): boolean => {
+    const isDirector = authUser.role === 'director' || (authUser.role === 'admin' && authUser.assignedClassId === 'all') || Boolean(authUser.isOverallAdmin);
+    if (isDirector) return true;
+    const isClassAdmin = Boolean(authUser.isClassAdmin) || authUser.role === 'admin';
+    if (!isClassAdmin) return false;
+    return targetHubClassId === authUser.assignedClassId;
+  }, [authUser]);
+
   // Presenter notification log (starts blank)
   const [notifications, setNotifications] = useState<{ id: string; to: string; message: string; timestamp: string }[]>([]);
 
@@ -428,6 +442,14 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
       case 'CUE_COPIED': {
         const { cueId, ack } = data.payload as { cueId: string; ack: StageCueCopyAck };
         if (cueId && ack) {
+          setSentUrgentTracker((prev) => {
+            if (!prev || prev.id !== cueId) return prev;
+            const copies = prev.copies || [];
+            if (copies.some((c) => c.userId === ack.userId || (c.stationName && c.stationName === ack.stationName))) {
+              return prev;
+            }
+            return { ...prev, copies: [...copies, ack] };
+          });
           setActiveCues((prev) =>
             prev.map((c) => {
               if (c.id === cueId) {
@@ -514,6 +536,14 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
         const myRole = activeRoleRef.current;
         const isOverallAdmin = Boolean(myUser?.isOverallAdmin || myRole === 'director');
 
+        // Senders should not be interrupted by their own announcement popup
+        const isSender = Boolean(
+          myUser && (announcement.senderId === myUser.id || (announcement.senderName && announcement.senderName === myUser.name))
+        );
+        if (isSender) {
+          break;
+        }
+
         // Verify if announcement is meant for current station or overall admin
         const isTargetedToUs = 
           announcement.targetClassId === 'all' || 
@@ -530,6 +560,59 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
               ? 'urgent'
               : 'normal'
           );
+        }
+        break;
+      }
+      case 'DIRECTOR_ANNOUNCEMENT_ACK': {
+        const { announcementId, ack } = data.payload as { announcementId: string; ack: StageCueCopyAck };
+        if (announcementId && ack) {
+          setSentUrgentTracker((prev) => {
+            if (!prev || prev.id !== announcementId) return prev;
+            const copies = prev.copies || [];
+            if (copies.some((c) => c.userId === ack.userId || (c.stationName && c.stationName === ack.stationName))) {
+              return prev;
+            }
+            return { ...prev, copies: [...copies, ack] };
+          });
+
+          setActiveDirectorAnnouncement((prev) => {
+            if (!prev || prev.id !== announcementId) return prev;
+            const copies = prev.copies || [];
+            if (copies.some((c) => c.userId === ack.userId || (c.stationName && c.stationName === ack.stationName))) {
+              return prev;
+            }
+            return { ...prev, copies: [...copies, ack] };
+          });
+
+          playRogerBeep();
+        }
+        break;
+      }
+      case 'COMMS_EMERGENCY_ACK': {
+        const { alertId, ack } = data.payload as { alertId: string; ack: StageCueCopyAck };
+        if (alertId && ack) {
+          setSentUrgentTracker((prev) => {
+            if (!prev || prev.id !== alertId) return prev;
+            const copies = prev.copies || [];
+            if (copies.some((c) => c.userId === ack.userId || (c.stationName && c.stationName === ack.stationName))) {
+              return prev;
+            }
+            return { ...prev, copies: [...copies, ack] };
+          });
+
+          setCommsEmergencyAlerts((prev) =>
+            prev.map((a) => {
+              if (a.id === alertId) {
+                const copies = a.copies || [];
+                if (!copies.some((c) => c.userId === ack.userId)) {
+                  return { ...a, copies: [...copies, ack] };
+                }
+              }
+              return a;
+            })
+          );
+
+          playRogerBeep();
         }
         break;
       }
@@ -1084,12 +1167,18 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
 
   // Switch between Class Hubs
   const switchClassHub = useCallback((newClassId: ClassId) => {
-    setSelectedClassId(newClassId);
+    const isDirector = authUser.role === 'director' || (authUser.role === 'admin' && authUser.assignedClassId === 'all') || Boolean(authUser.isOverallAdmin);
+    let effectiveClassId = newClassId;
+    if (!isDirector && authUser.assignedClassId && authUser.assignedClassId !== 'all') {
+      effectiveClassId = authUser.assignedClassId;
+    }
+
+    setSelectedClassId(effectiveClassId);
     try {
-      localStorage.setItem('kch_selected_class_id', newClassId);
+      localStorage.setItem('kch_selected_class_id', effectiveClassId);
     } catch (e) {}
 
-    const targetKey = newClassId === 'all' ? 'kb' : newClassId;
+    const targetKey = effectiveClassId === 'all' ? 'kb' : effectiveClassId;
     const targetHub = allClassHubs[targetKey] || allClassHubs.kb;
     if (targetHub) {
       setServiceState(targetHub.serviceState);
@@ -1103,7 +1192,17 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
       setReviewData(targetHub.reviewData);
       setPrayerRequests(targetHub.prayerRequests);
     }
-  }, [allClassHubs]);
+  }, [allClassHubs, authUser]);
+
+  // Ensure non-directors stay locked in their assigned class hub
+  useEffect(() => {
+    const isDirector = authUser.role === 'director' || (authUser.role === 'admin' && authUser.assignedClassId === 'all') || Boolean(authUser.isOverallAdmin);
+    if (!isDirector && authUser.assignedClassId && authUser.assignedClassId !== 'all') {
+      if (selectedClassId !== authUser.assignedClassId) {
+        switchClassHub(authUser.assignedClassId);
+      }
+    }
+  }, [authUser, selectedClassId, switchClassHub]);
 
   // Auth User Management & Account Registration
   const loginUser = useCallback((email: string, role?: Role, name?: string, classId?: ClassId) => {
@@ -1138,9 +1237,50 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
     setRegisteredAccounts(updated);
     setAuthUser(newUser);
     saveStoredAuthUser(newUser);
+
+    const newTeamMember: TeamMember = {
+      id: newUser.id,
+      name: newUser.name,
+      roleTitle: newUser.roleTitle || (newUser.role === 'director' ? 'Ministry Director' : newUser.isClassAdmin ? 'Class Admin' : newUser.role === 'tech' ? 'Technical Lead' : newUser.role === 'presenter' ? 'Lead Presenter' : 'Comms Lead'),
+      roleType: newUser.role,
+      avatarColor: newUser.avatarColor || 'from-purple-500 to-indigo-600',
+      isOnline: true,
+      phone: newUser.phone,
+    };
+
     if (newUser.assignedClassId && newUser.assignedClassId !== 'all') {
+      const targetClass = newUser.assignedClassId as ClassId;
+      setAllClassHubs((prev) => {
+        const hub = prev[targetClass] || prev.kb;
+        const exists = hub.teamMembers.some((m) => m.id === newUser.id || m.name.toLowerCase() === newUser.name.toLowerCase());
+        const updatedMembers = exists ? hub.teamMembers : [...hub.teamMembers, newTeamMember];
+        const updatedHub = {
+          ...hub,
+          teamMembers: updatedMembers,
+        };
+        const updatedAll = {
+          ...prev,
+          [targetClass]: updatedHub,
+        };
+        try {
+          localStorage.setItem(LOCAL_CLASS_HUBS_KEY, JSON.stringify(updatedAll));
+        } catch (e) {}
+        return updatedAll;
+      });
+
+      setTeamMembers((prev) => {
+        const exists = prev.some((m) => m.id === newUser.id || m.name.toLowerCase() === newUser.name.toLowerCase());
+        return exists ? prev : [...prev, newTeamMember];
+      });
+
       switchClassHub(newUser.assignedClassId);
+    } else {
+      setTeamMembers((prev) => {
+        const exists = prev.some((m) => m.id === newUser.id || m.name.toLowerCase() === newUser.name.toLowerCase());
+        return exists ? prev : [...prev, newTeamMember];
+      });
     }
+
     return updated;
   }, [switchClassHub]);
 
@@ -1169,8 +1309,23 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
     const updated = deleteAccount(userId);
     setRegisteredAccounts(updated);
     if (targetUser) {
-      // Also remove from active room team members if present
+      // Also remove from active room team members and all class hubs
       setTeamMembers((prev) => prev.filter((m) => m.id !== userId && m.name !== targetUser.name));
+      setAllClassHubs((prev) => {
+        const updatedAll = { ...prev };
+        (Object.keys(updatedAll) as ClassId[]).forEach((cid) => {
+          if (updatedAll[cid]) {
+            updatedAll[cid] = {
+              ...updatedAll[cid],
+              teamMembers: updatedAll[cid].teamMembers.filter((m) => m.id !== userId && m.name !== targetUser.name),
+            };
+          }
+        });
+        try {
+          localStorage.setItem(LOCAL_CLASS_HUBS_KEY, JSON.stringify(updatedAll));
+        } catch (e) {}
+        return updatedAll;
+      });
     }
     return updated;
   }, [registeredAccounts]);
@@ -1303,14 +1458,12 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
   }, [registeredAccounts]);
 
   const removeTeamMember = useCallback((memberId: string) => {
-    const isDirector = authUser.role === 'director' || (authUser.role === 'admin' && authUser.assignedClassId === 'all') || Boolean(authUser.isOverallAdmin);
-    const isClassAdmin = isDirector || Boolean(authUser.isClassAdmin) || authUser.role === 'admin';
-    if (!isDirector && !isClassAdmin) {
-      alert('Permission Denied: Only a Director or the assigned Class Admin can remove team members from this class.');
+    if (!canModifyHub(selectedClassId)) {
+      alert('Permission Denied: Only a Director or your assigned Class Admin can remove team members from this class.');
       return;
     }
     setTeamMembers((prev) => prev.filter((m) => m.id !== memberId));
-  }, [authUser]);
+  }, [canModifyHub, selectedClassId]);
 
   // Director Global Pop-up Announcement
   const sendDirectorAnnouncement = useCallback((
@@ -1323,17 +1476,56 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
       id: `ann_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       title,
       message,
+      senderId: authUser.id,
       senderName: authUser.name || 'Pastor Hope (Director)',
       senderRoleTitle: authUser.roleTitle || 'Kids Ministry Director',
       targetClassId,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       severity,
+      copies: [],
     };
-    setActiveDirectorAnnouncement(announcement);
+
+    // Live confirmation tracker for sender so they can watch stations acknowledge live
+    setSentUrgentTracker({
+      id: announcement.id,
+      type: 'director_announcement',
+      title: announcement.title,
+      message: announcement.message,
+      severity: announcement.severity,
+      targetClassId: announcement.targetClassId,
+      senderId: authUser.id,
+      senderName: announcement.senderName,
+      timestamp: announcement.timestamp,
+      copies: [],
+    });
+
     dispatchBroadcast('DIRECTOR_ANNOUNCEMENT', announcement);
     playCueSound(severity === 'emergency' ? 'emergency' : severity === 'important' ? 'urgent' : 'normal');
     return announcement;
   }, [authUser, dispatchBroadcast, playCueSound]);
+
+  const acknowledgeDirectorAnnouncement = useCallback((announcementId: string) => {
+    const current = authUserRef.current;
+    const currentClass = selectedClassIdRef.current;
+    const activeClass = CLASSES_CONFIG.find((c) => c.id === currentClass);
+
+    const ack: StageCueCopyAck = {
+      userId: current?.id || `station_${currentClass}_${activeRoleRef.current}`,
+      userName: current?.name || `${activeClass?.shortCode || 'CRC'} Lead`,
+      userRole: current?.role || activeRoleRef.current,
+      copiedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      classId: currentClass,
+      stationName: `${activeClass?.name || 'Class'} (${current?.roleTitle || activeRoleRef.current})`,
+    };
+
+    setActiveDirectorAnnouncement((prev) => {
+      if (!prev || prev.id !== announcementId) return prev;
+      return null;
+    });
+
+    dispatchBroadcast('DIRECTOR_ANNOUNCEMENT_ACK', { announcementId, ack });
+    playRogerBeep();
+  }, [dispatchBroadcast, playRogerBeep]);
 
   const dismissDirectorAnnouncement = useCallback(() => {
     setActiveDirectorAnnouncement(null);
@@ -1474,9 +1666,11 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
     dispatchBroadcast('SERVICE_TEMPLATES_UPDATE', DEFAULT_SERVICE_TEMPLATES);
   }, [dispatchBroadcast]);
 
-  const applyTemplateToLiveService = useCallback((templateId: string) => {
+  const applyTemplateToLiveService = useCallback((templateId: string, targetClassId?: ClassId | 'all') => {
     const template = serviceTemplates.find((t) => t.id === templateId);
     if (!template) return false;
+
+    const effectiveTarget: ClassId | 'all' = targetClassId || template.targetClassId || selectedClassId || 'all';
 
     // Convert template segments into active service segments
     let currentPlannedMinutes = 8 * 60 + 30; // 08:30 AM default start
@@ -1504,8 +1698,6 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
       };
     });
 
-    setSegments(newSegments);
-
     const firstSeg = newSegments[0];
     const firstDurationSec = (firstSeg?.durationMinutes || 15) * 60;
     const targetEndIso = new Date(Date.now() + firstDurationSec * 1000).toISOString();
@@ -1520,13 +1712,54 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
       lastUpdated: new Date().toISOString(),
     };
 
-    setServiceState(updatedState);
-    dispatchBroadcast('SERVICE_STATE_UPDATE', updatedState);
+    if (effectiveTarget === 'all') {
+      setSegments(newSegments);
+      setServiceState(updatedState);
+      setAllClassHubs((prev) => {
+        const updated = { ...prev };
+        (Object.keys(updated) as ClassId[]).forEach((key) => {
+          if (updated[key]) {
+            updated[key] = {
+              ...updated[key],
+              serviceState: updatedState,
+              segments: newSegments,
+            };
+          }
+        });
+        try {
+          localStorage.setItem(LOCAL_CLASS_HUBS_KEY, JSON.stringify(updated));
+        } catch (e) {}
+        return updated;
+      });
+      dispatchBroadcast('SERVICE_STATE_UPDATE', updatedState);
+      sendStageCue('custom', `📋 Applied Template: "${template.name}" across ALL 5 Class Hubs!`);
+    } else {
+      setAllClassHubs((prev) => {
+        const hub = prev[effectiveTarget] || prev.kb;
+        const updatedHub: ClassHubData = {
+          ...hub,
+          serviceState: updatedState,
+          segments: newSegments,
+        };
+        const updatedAll = {
+          ...prev,
+          [effectiveTarget]: updatedHub,
+        };
+        try {
+          localStorage.setItem(LOCAL_CLASS_HUBS_KEY, JSON.stringify(updatedAll));
+        } catch (e) {}
+        return updatedAll;
+      });
 
-    // Send stage cue banner
-    sendStageCue('custom', `📋 Applied Template: "${template.name}" with ${template.segments.length} segments`);
+      switchClassHub(effectiveTarget);
+      setSegments(newSegments);
+      setServiceState(updatedState);
+      dispatchBroadcast('SERVICE_STATE_UPDATE', updatedState);
+      sendStageCue('custom', `📋 Applied Template: "${template.name}" to ${effectiveTarget.toUpperCase()} Hub`);
+    }
+
     return true;
-  }, [serviceTemplates, serviceState, dispatchBroadcast, sendStageCue]);
+  }, [serviceTemplates, serviceState, selectedClassId, switchClassHub, dispatchBroadcast, sendStageCue]);
 
   // Enhanced Incident Logger with Real-Time Broadcast & Alert Trigger
   const addIncident = useCallback(
@@ -1603,6 +1836,10 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
 
   // Tech Checklist Admin Operations
   const addChecklistItem = useCallback((label: string, category: 'hardware' | 'audio' | 'media' | 'presentation' | 'general' = 'hardware') => {
+    if (!canModifyHub(selectedClassId)) {
+      alert('Permission Denied: You can only modify checklist items for your assigned class.');
+      return null;
+    }
     const newItem: PreServiceCheckItem = {
       id: `chk_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       label,
@@ -1616,23 +1853,31 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
       return next;
     });
     return newItem;
-  }, [dispatchBroadcast]);
+  }, [canModifyHub, selectedClassId, dispatchBroadcast]);
 
   const editChecklistItem = useCallback((id: string, updates: Partial<PreServiceCheckItem>) => {
+    if (!canModifyHub(selectedClassId)) {
+      alert('Permission Denied: You can only modify checklist items for your assigned class.');
+      return;
+    }
     setChecklist((prev) => {
       const next = prev.map((item) => (item.id === id ? { ...item, ...updates } : item));
       dispatchBroadcast('CHECKLIST_UPDATE', next);
       return next;
     });
-  }, [dispatchBroadcast]);
+  }, [canModifyHub, selectedClassId, dispatchBroadcast]);
 
   const deleteChecklistItem = useCallback((id: string) => {
+    if (!canModifyHub(selectedClassId)) {
+      alert('Permission Denied: You can only modify checklist items for your assigned class.');
+      return;
+    }
     setChecklist((prev) => {
       const next = prev.filter((item) => item.id !== id);
       dispatchBroadcast('CHECKLIST_UPDATE', next);
       return next;
     });
-  }, [dispatchBroadcast]);
+  }, [canModifyHub, selectedClassId, dispatchBroadcast]);
 
   // Timeline Segments Admin Operations
   const addSegment = useCallback((segmentData: {
@@ -1644,6 +1889,10 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
     notes?: string;
     keyScripture?: string;
   }) => {
+    if (!canModifyHub(selectedClassId)) {
+      alert('Permission Denied: You can only modify service segments for your assigned class.');
+      return;
+    }
     setSegments((prev) => {
       const newOrder = prev.length + 1;
       const newSeg: ServiceSegment = {
@@ -1675,16 +1924,24 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
       }
       return next;
     });
-  }, [serviceState, dispatchBroadcast]);
+  }, [canModifyHub, selectedClassId, serviceState, dispatchBroadcast]);
 
   const editSegment = useCallback((id: string, updates: Partial<ServiceSegment>) => {
+    if (!canModifyHub(selectedClassId)) {
+      alert('Permission Denied: You can only modify service segments for your assigned class.');
+      return;
+    }
     setSegments((prev) => {
       const next = prev.map((s) => (s.id === id ? { ...s, ...updates } : s));
       return next;
     });
-  }, []);
+  }, [canModifyHub, selectedClassId]);
 
   const deleteSegment = useCallback((id: string) => {
+    if (!canModifyHub(selectedClassId)) {
+      alert('Permission Denied: You can only modify service segments for your assigned class.');
+      return;
+    }
     setSegments((prev) => {
       const filtered = prev.filter((s) => s.id !== id);
       const reindexed = filtered.map((s, idx) => ({ ...s, order: idx + 1 }));
@@ -1699,10 +1956,15 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
       }
       return reindexed;
     });
-  }, [serviceState.currentSegmentId]);
+  }, [canModifyHub, selectedClassId, serviceState.currentSegmentId]);
 
   // Calendar Admin Operations
   const addCalendarEvent = useCallback((eventData: Omit<CalendarEvent, 'id'>) => {
+    const eventClass = eventData.classId || selectedClassId;
+    if (!canModifyHub(eventClass)) {
+      alert('Permission Denied: You can only create calendar events for your assigned class.');
+      return null;
+    }
     const newEvent: CalendarEvent = {
       ...eventData,
       id: `calevt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -1713,26 +1975,38 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
       return next;
     });
     return newEvent;
-  }, [dispatchBroadcast]);
+  }, [canModifyHub, selectedClassId, dispatchBroadcast]);
 
   const updateCalendarEvent = useCallback((id: string, updates: Partial<CalendarEvent>) => {
+    if (!canModifyHub(selectedClassId)) {
+      alert('Permission Denied: You can only modify calendar events for your assigned class.');
+      return;
+    }
     setCalendarEvents((prev) => {
       const next = prev.map((evt) => (evt.id === id ? { ...evt, ...updates } : evt));
       dispatchBroadcast('CALENDAR_UPDATE', next);
       return next;
     });
-  }, [dispatchBroadcast]);
+  }, [canModifyHub, selectedClassId, dispatchBroadcast]);
 
   const deleteCalendarEvent = useCallback((id: string) => {
+    if (!canModifyHub(selectedClassId)) {
+      alert('Permission Denied: You can only delete calendar events for your assigned class.');
+      return;
+    }
     setCalendarEvents((prev) => {
       const next = prev.filter((evt) => evt.id !== id);
       dispatchBroadcast('CALENDAR_UPDATE', next);
       return next;
     });
-  }, [dispatchBroadcast]);
+  }, [canModifyHub, selectedClassId, dispatchBroadcast]);
 
   // Quick Stage Presets Admin Operations
   const addQuickStagePreset = useCallback((presetData: Omit<QuickStagePreset, 'id'>) => {
+    if (!canModifyHub(selectedClassId)) {
+      alert('Permission Denied: Only a Director or your assigned Class Admin can modify presets.');
+      return null;
+    }
     const newPreset: QuickStagePreset = {
       ...presetData,
       id: `qp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -1743,35 +2017,62 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
       return next;
     });
     return newPreset;
-  }, [dispatchBroadcast]);
+  }, [canModifyHub, selectedClassId, dispatchBroadcast]);
 
   const updateQuickStagePreset = useCallback((id: string, updates: Partial<QuickStagePreset>) => {
+    if (!canModifyHub(selectedClassId)) {
+      alert('Permission Denied: Only a Director or your assigned Class Admin can modify presets.');
+      return;
+    }
     setQuickStagePresets((prev) => {
       const next = prev.map((p) => (p.id === id ? { ...p, ...updates } : p));
       dispatchBroadcast('QUICK_PRESETS_UPDATE', next);
       return next;
     });
-  }, [dispatchBroadcast]);
+  }, [canModifyHub, selectedClassId, dispatchBroadcast]);
 
   const deleteQuickStagePreset = useCallback((id: string) => {
+    if (!canModifyHub(selectedClassId)) {
+      alert('Permission Denied: Only a Director or your assigned Class Admin can modify presets.');
+      return;
+    }
     setQuickStagePresets((prev) => {
       const next = prev.filter((p) => p.id !== id);
       dispatchBroadcast('QUICK_PRESETS_UPDATE', next);
       return next;
     });
-  }, [dispatchBroadcast]);
+  }, [canModifyHub, selectedClassId, dispatchBroadcast]);
 
   // Comms Emergency Dispatch (Comms is the primary communicator)
   const sendCommsEmergency = useCallback((target: 'tech' | 'presenter' | 'all', message: string) => {
     const alert: CommsEmergencyAlert = {
       id: `emerg_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       target,
+      targetClassId: selectedClassId,
       message,
+      senderId: authUser.id,
       senderName: authUser?.name ? `${authUser.name} (Comms)` : 'Comms Desk',
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       acknowledged: false,
+      copies: [],
     };
     setCommsEmergencyAlerts((prev) => [alert, ...prev]);
+
+    // Live confirmation tracker for sender
+    setSentUrgentTracker({
+      id: alert.id,
+      type: 'comms_emergency',
+      title: `COMMS EMERGENCY -> ${target.toUpperCase()}`,
+      message: alert.message,
+      severity: 'emergency',
+      targetClassId: selectedClassId,
+      targetRole: target,
+      senderId: authUser.id,
+      senderName: alert.senderName,
+      timestamp: alert.timestamp,
+      copies: [],
+    });
+
     playCueSound('emergency');
     dispatchBroadcast('COMMS_EMERGENCY', alert);
 
@@ -1786,11 +2087,26 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
     setIncidents((prev) => [newIncident, ...prev]);
     dispatchBroadcast('INCIDENT_ADDED', newIncident);
     return alert;
-  }, [authUser?.name, dispatchBroadcast, playCueSound]);
+  }, [authUser, selectedClassId, dispatchBroadcast, playCueSound]);
 
   const acknowledgeCommsEmergency = useCallback((id: string) => {
+    const current = authUserRef.current;
+    const currentClass = selectedClassIdRef.current;
+    const activeClass = CLASSES_CONFIG.find((c) => c.id === currentClass);
+
+    const ack: StageCueCopyAck = {
+      userId: current?.id || `station_${currentClass}_${activeRoleRef.current}`,
+      userName: current?.name || `${activeClass?.shortCode || 'CRC'} Volunteer`,
+      userRole: current?.role || activeRoleRef.current,
+      copiedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      classId: currentClass,
+      stationName: `${activeClass?.name || 'Class'} (${current?.roleTitle || activeRoleRef.current})`,
+    };
+
     setCommsEmergencyAlerts((prev) => prev.filter((a) => a.id !== id));
-  }, []);
+    dispatchBroadcast('COMMS_EMERGENCY_ACK', { alertId: id, ack });
+    playRogerBeep();
+  }, [dispatchBroadcast, playRogerBeep]);
 
   // Saved Prayer Requests Operations (Saved permanently)
   const addPrayerRequest = useCallback((text: string, category: 'team' | 'kids' | 'service' | 'general' = 'team', customAuthor?: string) => {
@@ -1971,7 +2287,10 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
     removeTeamMember,
     activeDirectorAnnouncement,
     sendDirectorAnnouncement,
+    acknowledgeDirectorAnnouncement,
     dismissDirectorAnnouncement,
+    sentUrgentTracker,
+    dismissSentUrgentTracker,
     broadcastCueToAllClasses,
     sendCueToClass,
   };

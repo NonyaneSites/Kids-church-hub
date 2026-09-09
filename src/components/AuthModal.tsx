@@ -134,8 +134,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [regAvatarColor, setRegAvatarColor] = useState(AVATAR_COLORS[1]);
   const [regIsClassAdmin, setRegIsClassAdmin] = useState(false);
 
-  // Manage Filter
-  const [manageClassFilter, setManageClassFilter] = useState<string>('all_filter');
+  // Manage Filter (Directors can filter all, Class Admins are strictly locked to their assigned class)
+  const [manageClassFilter, setManageClassFilter] = useState<string>(
+    isDirector ? 'all_filter' : (currentUser?.assignedClassId || 'jy')
+  );
   const [manageSearch, setManageSearch] = useState('');
 
   const [errorMsg, setErrorMsg] = useState('');
@@ -329,12 +331,48 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setErrorMsg('You cannot delete your own currently active account session.');
       return;
     }
+
+    const isTargetDirector = user.role === 'director' || (user.role === 'admin' && user.assignedClassId === 'all') || Boolean(user.isOverallAdmin);
+    const isTargetClassAdmin = Boolean(user.isClassAdmin) || (user.role === 'admin' && user.assignedClassId !== 'all') || (user.role as string) === 'class-admin';
+
+    if (!isDirector) {
+      if (!isClassAdmin) {
+        setErrorMsg('Permission Denied: Only a Director or Class Admin can remove accounts.');
+        return;
+      }
+      if (user.assignedClassId !== currentUser.assignedClassId) {
+        setErrorMsg(`Permission Denied: As a Class Admin, you can only manage accounts within your assigned class (${currentUser.assignedClassId.toUpperCase()}).`);
+        return;
+      }
+      if (isTargetDirector || isTargetClassAdmin) {
+        setErrorMsg('Permission Denied: Class Admins cannot delete Director or Class Admin accounts. Only the Director can do that.');
+        return;
+      }
+    }
+
     setErrorMsg('');
     setUserToDelete(user);
   };
 
   const handleExecuteDeleteUser = () => {
     if (!userToDelete) return;
+    if (userToDelete.id === currentUser.id) {
+      setErrorMsg('You cannot delete your own account.');
+      setUserToDelete(null);
+      return;
+    }
+
+    const isTargetDirector = userToDelete.role === 'director' || (userToDelete.role === 'admin' && userToDelete.assignedClassId === 'all') || Boolean(userToDelete.isOverallAdmin);
+    const isTargetClassAdmin = Boolean(userToDelete.isClassAdmin) || (userToDelete.role === 'admin' && userToDelete.assignedClassId !== 'all') || (userToDelete.role as string) === 'class-admin';
+
+    if (!isDirector) {
+      if (!isClassAdmin || userToDelete.assignedClassId !== currentUser.assignedClassId || isTargetDirector || isTargetClassAdmin) {
+        setErrorMsg('Permission Denied: Unauthorized account deletion.');
+        setUserToDelete(null);
+        return;
+      }
+    }
+
     onDeleteAccount(userToDelete.id);
     setSuccessMsg(`Account for "${userToDelete.name}" successfully removed from database.`);
     setUserToDelete(null);
@@ -363,9 +401,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       acc.email.toLowerCase().includes(manageSearch.toLowerCase()) ||
       (acc.phone && acc.phone.includes(manageSearch));
 
+    // Non-directors can ONLY see accounts belonging to their assigned class
+    const effectiveClassFilter = isDirector 
+      ? manageClassFilter 
+      : (currentUser?.assignedClassId || 'all_filter');
+
     const matchesClass = 
-      manageClassFilter === 'all_filter' || 
-      acc.assignedClassId === manageClassFilter;
+      effectiveClassFilter === 'all_filter' || 
+      acc.assignedClassId === effectiveClassFilter;
 
     return matchesSearch && matchesClass;
   });
@@ -1056,29 +1099,48 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   className="w-full sm:w-64 bg-black/40 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-purple-500"
                 />
 
-                <select
-                  value={manageClassFilter}
-                  onChange={(e) => setManageClassFilter(e.target.value)}
-                  className="w-full sm:w-auto bg-black/40 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-purple-500 font-semibold"
-                >
-                  <option value="all_filter">All Classes</option>
-                  <option value="jy">Junior Youth (Blue)</option>
-                  <option value="tb">TRAILBLAZERS (Pink)</option>
-                  <option value="kb">Kingdom Builders (Red)</option>
-                  <option value="la-orange">LA Orange</option>
-                  <option value="la-yellow">LA Yellow</option>
-                  <option value="all">Director / Global</option>
-                </select>
+                {isDirector ? (
+                  <select
+                    value={manageClassFilter}
+                    onChange={(e) => setManageClassFilter(e.target.value)}
+                    className="w-full sm:w-auto bg-black/40 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-purple-500 font-semibold"
+                  >
+                    <option value="all_filter">All Classes</option>
+                    <option value="jy">Junior Youth (Blue)</option>
+                    <option value="tb">TRAILBLAZERS (Pink)</option>
+                    <option value="kb">Kingdom Builders (Red)</option>
+                    <option value="la-orange">LA Orange</option>
+                    <option value="la-yellow">LA Yellow</option>
+                    <option value="all">Director / Global</option>
+                  </select>
+                ) : (
+                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-purple-950/40 border border-purple-500/30 text-xs text-purple-200">
+                    <span className="text-gray-400 font-normal">Class Roster:</span>
+                    <span className="font-bold text-white uppercase">
+                      {CLASSES_CONFIG.find((c) => c.id === currentUser?.assignedClassId)?.name || currentUser?.assignedClassId?.toUpperCase() || 'Assigned'}
+                    </span>
+                    <span className="text-[10px] bg-purple-500/20 px-1.5 py-0.5 rounded text-purple-300 font-mono">
+                      Class Locked
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Account Roster List */}
               <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
                 {filteredAccounts.map((user) => {
                   const isCurrent = currentUser?.id === user.id;
-                  const isTargetDirector = user.role === 'director' || (user.role === 'admin' && user.assignedClassId === 'all');
-                  const isTargetClassAdmin = Boolean(user.isClassAdmin) || (user.role === 'admin' && user.assignedClassId !== 'all');
+                  const isTargetDirector = user.role === 'director' || (user.role === 'admin' && user.assignedClassId === 'all') || Boolean(user.isOverallAdmin);
+                  const isTargetClassAdmin = Boolean(user.isClassAdmin) || (user.role === 'admin' && user.assignedClassId !== 'all') || (user.role as string) === 'class-admin';
                   
-                  const canDelete = !isCurrent;
+                  const canDelete = isDirector
+                    ? !isCurrent
+                    : isClassAdmin
+                    ? !isCurrent &&
+                      user.assignedClassId === currentUser?.assignedClassId &&
+                      !isTargetDirector &&
+                      !isTargetClassAdmin
+                    : false;
 
                   return (
                     <div

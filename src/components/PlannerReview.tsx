@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Calendar as CalendarIcon,
   Star,
@@ -62,10 +62,23 @@ export const PlannerReview: React.FC<PlannerReviewProps> = ({
   const [newEventDate, setNewEventDate] = useState(selectedDateStr);
   const [newEventTime, setNewEventTime] = useState('09:00 AM');
   const [newEventType, setNewEventType] = useState<'service' | 'rehearsal' | 'meeting' | 'special'>('service');
-  const [newEventClassId, setNewEventClassId] = useState<ClassId | 'all'>('all');
+  const [newEventClassId, setNewEventClassId] = useState<ClassId | 'all'>(activeClassId || 'all');
   const [newEventTheme, setNewEventTheme] = useState('');
   const [newEventLead, setNewEventLead] = useState('');
   const [newEventNotes, setNewEventNotes] = useState('');
+
+  // Keep target class hub synchronized with currently active class hub
+  useEffect(() => {
+    if (activeClassId) {
+      setNewEventClassId(activeClassId);
+    }
+  }, [activeClassId]);
+
+  const handleOpenAddEventModal = () => {
+    setNewEventDate(selectedDateStr || new Date().toISOString().split('T')[0]);
+    setNewEventClassId(activeClassId || 'all');
+    setShowAddEventModal(true);
+  };
 
   // Prayer State
   const [showPrayerModal, setShowPrayerModal] = useState(false);
@@ -236,10 +249,7 @@ export const PlannerReview: React.FC<PlannerReviewProps> = ({
           {isClassAdmin && addCalendarEvent && (
             <button
               id="btn-add-event-top"
-              onClick={() => {
-                setNewEventDate(selectedDateStr);
-                setShowAddEventModal(true);
-              }}
+              onClick={handleOpenAddEventModal}
               className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-[0_0_15px_rgba(99,102,241,0.4)] transition-all"
             >
               <Plus className="w-4 h-4" />
@@ -355,10 +365,7 @@ export const PlannerReview: React.FC<PlannerReviewProps> = ({
               </div>
               {isClassAdmin && addCalendarEvent && (
                 <button
-                  onClick={() => {
-                    setNewEventDate(selectedDateStr);
-                    setShowAddEventModal(true);
-                  }}
+                  onClick={handleOpenAddEventModal}
                   className="px-2.5 py-1 rounded-lg bg-purple-600/30 hover:bg-purple-600 text-purple-200 hover:text-white border border-purple-500/40 font-bold text-[11px] flex items-center gap-1 transition-all"
                 >
                   <Plus className="w-3 h-3" />
@@ -379,10 +386,7 @@ export const PlannerReview: React.FC<PlannerReviewProps> = ({
                   <p>No services or events scheduled for this day.</p>
                   {isClassAdmin && addCalendarEvent && (
                     <button
-                      onClick={() => {
-                        setNewEventDate(selectedDateStr);
-                        setShowAddEventModal(true);
-                      }}
+                      onClick={handleOpenAddEventModal}
                       className="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-bold text-[11px] transition-all"
                     >
                       + Schedule a Service
@@ -777,18 +781,25 @@ export const PlannerReview: React.FC<PlannerReviewProps> = ({
                 </div>
 
                 <div>
-                  <label className="block font-bold text-gray-300 uppercase mb-1">Target Class Hub</label>
+                  <label className="block font-bold text-gray-300 uppercase mb-1 flex items-center justify-between">
+                    <span>Target Class Hub *</span>
+                    {activeClassId && (
+                      <span className="text-[10px] text-purple-300 font-semibold lowercase">
+                        active: {activeClassId === 'all' ? 'All Classes' : activeClassId.toUpperCase()}
+                      </span>
+                    )}
+                  </label>
                   <select
                     value={newEventClassId}
                     onChange={(e) => setNewEventClassId(e.target.value as any)}
-                    className="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-xs text-white focus:outline-none focus:border-purple-500"
+                    className="w-full bg-black/40 border border-purple-500/30 rounded-xl p-2.5 text-xs text-white focus:outline-none focus:border-purple-400 font-semibold"
                   >
-                    <option value="all">All Classes (Global)</option>
-                    <option value="kb">Kingdom Builders (Ages 7-9)</option>
-                    <option value="tb">Truth Builders (Ages 10-12)</option>
-                    <option value="jy">Junior Youth (Ages 13-14)</option>
-                    <option value="la-orange">Little Arrows Orange (Ages 4-6)</option>
-                    <option value="la-yellow">Little Arrows Yellow (Ages 2-3)</option>
+                    <option value="all">🌟 All Classes (Global Multi-Room Event)</option>
+                    <option value="jy">🔵 Junior Youth (Ages 13-14) - Blue Class</option>
+                    <option value="tb">🌸 Truth Builders (Ages 10-12) - Pink Class</option>
+                    <option value="kb">🔴 Kingdom Builders (Ages 7-9) - Red Class</option>
+                    <option value="la-orange">🟠 Little Arrows Orange (Ages 4-6)</option>
+                    <option value="la-yellow">🟡 Little Arrows Yellow (Ages 2-3)</option>
                   </select>
                 </div>
               </div>

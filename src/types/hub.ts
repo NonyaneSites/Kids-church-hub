@@ -94,6 +94,8 @@ export interface StageCueCopyAck {
   userName: string;
   userRole: Role;
   copiedAt: string; // e.g. "09:42"
+  classId?: ClassId | 'all';
+  stationName?: string;
 }
 
 export interface StageCueBroadcast {
@@ -103,6 +105,7 @@ export interface StageCueBroadcast {
   message: string;
   senderRole: Role;
   senderName: string;
+  senderId?: string;
   timestamp: string;
   expiresAt: string;
   priority: 'normal' | 'urgent' | 'emergency';
@@ -215,6 +218,7 @@ export interface DirectorAnnouncement {
   id: string;
   title: string;
   message: string;
+  senderId?: string;
   senderName: string;
   senderRoleTitle: string;
   targetClassId: ClassId | 'all';
@@ -258,6 +262,7 @@ export interface ServiceTemplate {
   targetDurationMinutes: number;
   segments: ServiceTemplateSegment[];
   isDefault?: boolean;
+  targetClassId?: ClassId | 'all';
   createdAt: string;
   updatedAt: string;
   createdBy: string;
@@ -286,7 +291,9 @@ export interface BroadcastChannelEvent<T = unknown> {
     | 'SERVICE_TEMPLATES_UPDATE'
     | 'AUTH_USER_CHANGE'
     | 'DIRECTOR_ANNOUNCEMENT'
+    | 'DIRECTOR_ANNOUNCEMENT_ACK'
     | 'COMMS_EMERGENCY'
+    | 'COMMS_EMERGENCY_ACK'
     | 'CALENDAR_UPDATE'
     | 'QUICK_PRESETS_UPDATE'
     | 'WEEKLY_RESET';
@@ -320,11 +327,27 @@ export interface QuickStagePreset {
 export interface CommsEmergencyAlert {
   id: string;
   target: 'tech' | 'presenter' | 'all';
+  targetClassId?: ClassId | 'all';
   message: string;
+  senderId?: string;
   senderName: string;
   timestamp: string;
   acknowledged?: boolean;
   copies?: StageCueCopyAck[];
+}
+
+export interface SentUrgentTrackerItem {
+  id: string;
+  type: 'director_announcement' | 'comms_emergency' | 'stage_cue';
+  title: string;
+  message: string;
+  severity: 'normal' | 'important' | 'emergency';
+  targetClassId: ClassId | 'all';
+  targetRole?: 'tech' | 'presenter' | 'all';
+  senderId?: string;
+  senderName: string;
+  timestamp: string;
+  copies: StageCueCopyAck[];
 }
 
 // Convenient aliases
