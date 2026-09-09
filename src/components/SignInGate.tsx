@@ -30,7 +30,7 @@ import {
 import { AuthUser, Role, ClassId } from '../types/hub';
 import { CLASSES_CONFIG } from '../data/classHubsData';
 import { CrcLogo } from './CrcLogo';
-import { DatabaseDiagnostics, getLatestDatabaseDiagnostics } from '../lib/supabase';
+import { DatabaseDiagnostics, getLatestDatabaseDiagnostics, resetSupabaseClient } from '../lib/supabase';
 
 interface SignInGateProps {
   onSignIn: (user: AuthUser) => void;
@@ -126,6 +126,11 @@ export const SignInGate: React.FC<SignInGateProps> = ({
   const handleManualRetry = async () => {
     setIsRetrying(true);
     try {
+      try {
+        localStorage.removeItem('kch_custom_supabase_url');
+        localStorage.removeItem('kch_custom_supabase_anon_key');
+      } catch (e) {}
+      resetSupabaseClient();
       if (onRefreshAccounts) {
         await onRefreshAccounts();
       }
@@ -139,6 +144,7 @@ export const SignInGate: React.FC<SignInGateProps> = ({
       localStorage.removeItem('kch_custom_supabase_url');
       localStorage.removeItem('kch_custom_supabase_anon_key');
     } catch (e) {}
+    resetSupabaseClient();
     window.location.href = window.location.pathname + '?v=' + Date.now();
   };
 

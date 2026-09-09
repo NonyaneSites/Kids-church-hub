@@ -33,66 +33,45 @@ export function isLikelySupabaseKey(key: string): boolean {
 }
 
 /**
- * Validates whether a given string is a valid Supabase HTTP(S) URL with a real hostname.
- * Hardened to reject bracketed markdown, truncated prefixes (e.g. "https://[https:"),
- * or strings missing a proper domain name.
- */
-export function isLikelySupabaseUrl(url: string): boolean {
-  if (!url || typeof url !== 'string') return false;
-  const clean = url.trim().replace(/[\r\n\t\[\]"'`]/g, '');
-  if (!clean || clean.includes('[') || clean.includes(']')) return false;
-
-  try {
-    const candidate = clean.startsWith('http://') || clean.startsWith('https://')
-      ? clean
-      : 'https://' + clean;
-    const parsed = new URL(candidate);
-    return (
-      (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
-      Boolean(parsed.hostname) &&
-      parsed.hostname.length >= 4 &&
-      parsed.hostname.includes('.') &&
-      !parsed.hostname.includes(':') &&
-      !parsed.hostname.includes('[')
-    );
-  } catch (e) {
-    return false;
-  }
-}
-
-/**
- * Strips /rest/v1, trailing slashes, markdown brackets, quotes, and paths
+ * Strips /rest/v1, trailing slashes, markdown brackets/parentheses, quotes, and paths
  * so Supabase client and REST fetch get a pristine base origin URL.
- * e.g. "https://ifyhflqwdlgnqfryojxi.supabase.co/rest/v1/" -> "https://ifyhflqwdlgnqfryojxi.supabase.co"
- * Guarantees that malformed inputs like "https://[https:" return empty string.
+ * e.g. "[https://ifyhflqwdlgnqfryojxi.supabase.co](https://...)" -> "https://ifyhflqwdlgnqfryojxi.supabase.co"
+ * "https://ifyhflqwdlgnqfryojxi.supabase.co(https/rest/v1/" -> "https://ifyhflqwdlgnqfryojxi.supabase.co"
  */
 export function sanitizeSupabaseUrl(rawUrl: string): string {
   if (!rawUrl || typeof rawUrl !== 'string') return '';
-  let url = rawUrl.trim().replace(/[\r\n\t\[\]"'`]/g, '');
-  if (!url) return '';
+  const clean = rawUrl.trim();
+  if (!clean) return '';
 
-  // Clean up any double-scheme prefixes e.g. "https://https://"
-  url = url.replace(/^(https?:\/\/)+(https?:\/\/)+/i, '$2');
-
-  // Ensure scheme is present before parsing
-  if (!url.startsWith('http://') && !url.startsWith('https://')) {
-    url = 'https://' + url;
+  // 1. Direct regex for official Supabase project URLs (e.g. https://ifyhflqwdlgnqfryojxi.supabase.co)
+  // Extracts valid project origin even if surrounded by markdown [..](..) or malformed suffixes
+  const supabaseMatch = clean.match(/https?:\/\/[a-zA-Z0-9\-]+\.supabase\.co/i);
+  if (supabaseMatch) {
+    return supabaseMatch[0].toLowerCase();
   }
 
-  try {
-    const parsed = new URL(url);
-    if (parsed.hostname && parsed.hostname.includes('.') && !parsed.hostname.includes('[')) {
-      return `${parsed.protocol}//${parsed.host}`;
-    }
-  } catch (e) {}
+  // 2. Direct regex for naked project domain (e.g. ifyhflqwdlgnqfryojxi.supabase.co)
+  const nakedSupabase = clean.match(/[a-zA-Z0-9\-]+\.supabase\.co/i);
+  if (nakedSupabase) {
+    return ('https://' + nakedSupabase[0]).toLowerCase();
+  }
 
-  // Strict regex fallback to extract protocol + valid hostname
-  const match = url.match(/^(https?:\/\/([a-zA-Z0-9_\-\.]+))/i);
-  if (match && match[2].includes('.')) {
-    return match[1];
+  // 3. Generic valid HTTP/HTTPS domain without path, query, or illegal characters
+  // Hostname must strictly follow RFC 1123: only alphanumerics and hyphens separated by dots
+  const genericMatch = clean.match(/^(https?:\/\/([a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?)+(:\d+)?))/i);
+  if (genericMatch) {
+    return genericMatch[1].toLowerCase();
   }
 
   return '';
+}
+
+/**
+ * Validates whether a given string is a valid Supabase HTTP(S) URL with a real hostname.
+ */
+export function isLikelySupabaseUrl(url: string): boolean {
+  if (!url || typeof url !== 'string') return false;
+  return Boolean(sanitizeSupabaseUrl(url));
 }
 
 /**
@@ -136,15 +115,20 @@ export function getSupabaseConfig(): {
         customKey = '';
       }
 
-      // Detect and purge corrupt URL (e.g. malformed "https://[https:" or bracketed strings)
+      // Detect and purge corrupt or redundant URL
       if (customUrl) {
         const sanitized = sanitizeSupabaseUrl(customUrl);
-        if (!sanitized || !isLikelySupabaseUrl(sanitized)) {
+        if (!sanitized) {
           console.warn('[Supabase Config] Corrupted custom URL detected in localStorage. Purging:', customUrl);
+          localStorage.removeItem(STORAGE_SUPABASE_URL_KEY);
+          customUrl = '';
+        } else if (sanitized === DEFAULT_SUPABASE_URL) {
+          // If it is already pointing to the default church project, remove redundant override
           localStorage.removeItem(STORAGE_SUPABASE_URL_KEY);
           customUrl = '';
         } else {
           customUrl = sanitized;
+          localStorage.setItem(STORAGE_SUPABASE_URL_KEY, sanitized);
         }
       }
     } catch (e) {}
