@@ -302,8 +302,37 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
   const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
   const clientIdRef = useRef<string>(`client_${Math.random().toString(36).substring(2, 9)}`);
 
-  // Ephemeral cue sound synthesizer using Web Audio API (no external sound file dependency)
+  // Synchronized refs for stable access inside the incoming broadcast listener
+  const selectedClassIdRef = useRef<ClassId>(selectedClassId);
+  useEffect(() => {
+    selectedClassIdRef.current = selectedClassId;
+  }, [selectedClassId]);
+
+  const activeRoleRef = useRef<Role>(activeRole);
+  useEffect(() => {
+    activeRoleRef.current = activeRole;
+  }, [activeRole]);
+
+  const authUserRef = useRef<AuthUser>(authUser);
+  useEffect(() => {
+    authUserRef.current = authUser;
+  }, [authUser]);
+
+  // Ephemeral cue sound synthesizer using Web Audio API + mobile haptic vibration
   const playCueSound = useCallback((priority: 'normal' | 'urgent' | 'emergency') => {
+    // Mobile haptic vibration if available
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      try {
+        if (priority === 'emergency') {
+          navigator.vibrate([300, 100, 300, 100, 400]);
+        } else if (priority === 'urgent') {
+          navigator.vibrate([200, 80, 200]);
+        } else {
+          navigator.vibrate(120);
+        }
+      } catch (e) {}
+    }
+
     try {
       const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (!AudioContextClass) return;
@@ -378,8 +407,22 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
     switch (data.event) {
       case 'STAGE_CUE': {
         const cue = data.payload as StageCueBroadcast;
-        setActiveCues((prev) => [cue, ...prev.filter((c) => c.id !== cue.id)]);
-        playCueSound(cue.priority);
+        const myClass = selectedClassIdRef.current;
+        const myUser = authUserRef.current;
+        const myRole = activeRoleRef.current;
+        const isOverallAdmin = Boolean(myUser?.isOverallAdmin || myRole === 'director');
+
+        const isTargetMatch = 
+          !cue.targetClassId || 
+          cue.targetClassId === 'all' || 
+          cue.targetClassId === myClass ||
+          myUser?.assignedClassId === cue.targetClassId ||
+          isOverallAdmin;
+
+        if (isTargetMatch) {
+          setActiveCues((prev) => [cue, ...prev.filter((c) => c.id !== cue.id)]);
+          playCueSound(cue.priority);
+        }
         break;
       }
       case 'CUE_COPIED': {
@@ -466,20 +509,46 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
       }
       case 'DIRECTOR_ANNOUNCEMENT': {
         const announcement = data.payload as DirectorAnnouncement;
-        setActiveDirectorAnnouncement(announcement);
-        playCueSound(
-          announcement.severity === 'emergency'
-            ? 'emergency'
-            : announcement.severity === 'important'
-            ? 'urgent'
-            : 'normal'
-        );
+        const myClass = selectedClassIdRef.current;
+        const myUser = authUserRef.current;
+        const myRole = activeRoleRef.current;
+        const isOverallAdmin = Boolean(myUser?.isOverallAdmin || myRole === 'director');
+
+        // Verify if announcement is meant for current station or overall admin
+        const isTargetedToUs = 
+          announcement.targetClassId === 'all' || 
+          announcement.targetClassId === myClass ||
+          myUser?.assignedClassId === announcement.targetClassId ||
+          isOverallAdmin;
+
+        if (isTargetedToUs) {
+          setActiveDirectorAnnouncement(announcement);
+          playCueSound(
+            announcement.severity === 'emergency'
+              ? 'emergency'
+              : announcement.severity === 'important'
+              ? 'urgent'
+              : 'normal'
+          );
+        }
         break;
       }
       case 'COMMS_EMERGENCY': {
         const alert = data.payload as CommsEmergencyAlert;
-        setCommsEmergencyAlerts((prev) => [alert, ...prev.filter((a) => a.id !== alert.id)]);
-        playCueSound('emergency');
+        const myRole = activeRoleRef.current;
+        const myUser = authUserRef.current;
+        const isOverallAdmin = Boolean(myUser?.isOverallAdmin || myRole === 'director');
+
+        const isTargetedToUs = 
+          alert.target === 'all' ||
+          (alert.target === 'presenter' && myRole === 'presenter') ||
+          (alert.target === 'tech' && myRole === 'tech') ||
+          isOverallAdmin;
+
+        if (isTargetedToUs) {
+          setCommsEmergencyAlerts((prev) => [alert, ...prev.filter((a) => a.id !== alert.id)]);
+          playCueSound('emergency');
+        }
         break;
       }
       case 'CALENDAR_UPDATE': {
@@ -1234,8 +1303,8 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
   }, [registeredAccounts]);
 
   const removeTeamMember = useCallback((memberId: string) => {
-    const isDirector = authUser.role === 'director' || (authUser.role === 'admin' && authUser.assignedClassId === 'all');
-    const isClassAdmin = authUser.isClassAdmin || authUser.role === 'admin';
+    const isDirector = authUser.role === 'director' || (authUser.role === 'admin' && authUser.assignedClassId === 'all') || Boolean(authUser.isOverallAdmin);
+    const isClassAdmin = isDirector || Boolean(authUser.isClassAdmin) || authUser.role === 'admin';
     if (!isDirector && !isClassAdmin) {
       alert('Permission Denied: Only a Director or the assigned Class Admin can remove team members from this class.');
       return;

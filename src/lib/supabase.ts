@@ -436,6 +436,8 @@ export interface SupabaseRowAccount {
 }
 
 export function mapRowToAuthUser(row: SupabaseRowAccount): AuthUser {
+  const isDirector = row.role === 'director' || (row.role === 'admin' && row.assigned_class_id === 'all');
+  const isClassAdmin = isDirector || Boolean(row.is_class_admin) || row.role === 'admin';
   return {
     id: row.id,
     name: row.name || 'Team Member',
@@ -446,7 +448,8 @@ export function mapRowToAuthUser(row: SupabaseRowAccount): AuthUser {
     phone: row.phone || '',
     whatsapp: row.whatsapp || '',
     avatarColor: row.avatar_color || 'from-purple-600 to-indigo-600',
-    isClassAdmin: Boolean(row.is_class_admin),
+    isClassAdmin: isClassAdmin,
+    isOverallAdmin: isDirector,
     pin: row.pin || '',
     isAdminPromotedBy: row.is_admin_promoted_by || undefined,
     isAuthenticated: true,
@@ -454,6 +457,7 @@ export function mapRowToAuthUser(row: SupabaseRowAccount): AuthUser {
 }
 
 export function mapAuthUserToRow(user: AuthUser): SupabaseRowAccount {
+  const isDirector = user.role === 'director' || (user.role === 'admin' && user.assignedClassId === 'all') || Boolean(user.isOverallAdmin);
   return {
     id: user.id,
     name: user.name || 'Team Member',
@@ -464,7 +468,7 @@ export function mapAuthUserToRow(user: AuthUser): SupabaseRowAccount {
     phone: user.phone || '',
     whatsapp: user.whatsapp || '',
     avatar_color: user.avatarColor || 'from-purple-600 to-indigo-600',
-    is_class_admin: Boolean(user.isClassAdmin),
+    is_class_admin: isDirector ? true : Boolean(user.isClassAdmin),
     pin: user.pin || '',
     is_admin_promoted_by: user.isAdminPromotedBy || null,
     updated_at: new Date().toISOString(),
@@ -1085,7 +1089,8 @@ export const PRECONFIGURED_USERS: AuthUser[] = [
     phone: '+27 83 661 0607',
     whatsapp: '27836610607',
     pin: '2504',
-    isClassAdmin: false,
+    isClassAdmin: true,
+    isOverallAdmin: true,
     isAuthenticated: true,
   },
   {
@@ -1113,6 +1118,8 @@ export const PRECONFIGURED_USERS: AuthUser[] = [
     phone: '+27 82 123 4567',
     whatsapp: '27821234567',
     pin: '7492',
+    isClassAdmin: true,
+    isOverallAdmin: true,
     isAuthenticated: true,
   },
   {

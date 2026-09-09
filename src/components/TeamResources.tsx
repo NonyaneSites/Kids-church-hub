@@ -66,8 +66,8 @@ export const TeamResources: React.FC<TeamResourcesProps> = ({
   const [accountToDelete, setAccountToDelete] = useState<AuthUser | null>(null);
   const [accountToToggleAdmin, setAccountToToggleAdmin] = useState<AuthUser | null>(null);
 
-  const isDirector = currentUser?.role === 'director' || (currentUser?.role === 'admin' && currentUser?.assignedClassId === 'all');
-  const isClassAdmin = Boolean(currentUser?.isClassAdmin) || (currentUser?.role === 'admin' && currentUser?.assignedClassId !== 'all');
+  const isDirector = currentUser?.role === 'director' || (currentUser?.role === 'admin' && currentUser?.assignedClassId === 'all') || Boolean(currentUser?.isOverallAdmin);
+  const isClassAdmin = isDirector || Boolean(currentUser?.isClassAdmin) || (currentUser?.role === 'admin') || (currentUser?.role as string) === 'class-admin';
 
   const showTemporaryNotice = (msg: string) => {
     setActionNotice(msg);

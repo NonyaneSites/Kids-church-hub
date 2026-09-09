@@ -255,7 +255,7 @@ export const SignInGate: React.FC<SignInGateProps> = ({
   const filteredAccounts = registeredAccounts.filter((acc) => {
     if (filterRole === 'all') return true;
     if (filterRole === 'director') return acc.role === 'director' || (acc.role === 'admin' && acc.assignedClassId === 'all');
-    if (filterRole === 'admin') return acc.isClassAdmin === true || (acc.role === 'admin' && acc.assignedClassId !== 'all');
+    if (filterRole === 'admin') return acc.isClassAdmin === true || acc.role === 'admin' || acc.role === 'director' || acc.isOverallAdmin === true;
     return acc.role === filterRole;
   });
 

@@ -14,7 +14,8 @@ import { AuthModal } from './components/AuthModal';
 import { SignInGate } from './components/SignInGate';
 import { IncidentRealtimeToast } from './components/IncidentRealtimeToast';
 import { ServiceTemplateEditor } from './components/ServiceTemplateEditor';
-import { DirectorAnnouncementPopup, DirectorComposeModal } from './components/DirectorAnnouncementPopup';
+import { DirectorComposeModal } from './components/DirectorAnnouncementPopup';
+import { FullScreenMessageTakeover } from './components/FullScreenMessageTakeover';
 import { 
   ShieldAlert, 
   Sparkles, 
@@ -125,8 +126,8 @@ export default function App() {
     sendCueToClass,
   } = useServiceSync(activeRole);
 
-  const isDirector = authUser?.role === 'director' || (authUser?.role === 'admin' && authUser?.assignedClassId === 'all');
-  const isClassAdmin = Boolean(authUser?.isClassAdmin) || (authUser?.role === 'admin') || (authUser?.role as string) === 'class-admin' || isDirector;
+  const isDirector = authUser?.role === 'director' || (authUser?.role === 'admin' && authUser?.assignedClassId === 'all') || Boolean(authUser?.isOverallAdmin);
+  const isClassAdmin = isDirector || Boolean(authUser?.isClassAdmin) || (authUser?.role === 'admin') || (authUser?.role as string) === 'class-admin';
   const isTechOnly = authUser?.role === 'tech';
   const isPresenterOnly = authUser?.role === 'presenter';
   const isCommsOnly = authUser?.role === 'comms';
@@ -503,18 +504,31 @@ export default function App() {
         initialTab={authModalInitialTab}
       />
 
-      {/* Director Global Broadcast Announcement Popup Alert (shown across classes) */}
-      <DirectorAnnouncementPopup
-        announcement={activeDirectorAnnouncement}
-        onDismiss={dismissDirectorAnnouncement}
+      {/* Full-Screen Message & Emergency Takeover (Guaranteed unmissable across whole screen) */}
+      <FullScreenMessageTakeover
+        directorAnnouncement={activeDirectorAnnouncement}
+        onDismissDirectorAnnouncement={dismissDirectorAnnouncement}
+        emergencyAlerts={commsEmergencyAlerts}
+        onAcknowledgeEmergencyAlert={acknowledgeCommsEmergency}
+        isEmergencyActive={serviceState.isEmergencyActive}
+        activeEmergencyType={serviceState.activeEmergencyType}
+        onClearEmergency={clearEmergency}
+        urgentCues={activeCues}
+        onCopyCue={acknowledgeCopyCue}
+        onDismissCue={dismissCue}
+        currentUserId={authUser?.id}
+        currentUserName={authUser?.name}
+        currentUserRole={activeRole}
+        selectedClassId={selectedClassId}
+        isOverallAdmin={Boolean(authUser?.isOverallAdmin || activeRole === 'director')}
       />
 
       {/* Director Compose Global Announcement Modal */}
       <DirectorComposeModal
         isOpen={isDirectorComposeOpen}
         onClose={() => setIsDirectorComposeOpen(false)}
-        onSendAnnouncement={(title, msg, targetClassId, severity) => {
-          sendDirectorAnnouncement(title, msg, targetClassId, severity);
+        onSendAnnouncement={(title, msg, severity, targetClassId) => {
+          sendDirectorAnnouncement(title, msg, severity, targetClassId);
           setIsDirectorComposeOpen(false);
         }}
         defaultClassId={selectedClassId}

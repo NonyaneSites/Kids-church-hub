@@ -205,6 +205,7 @@ export interface AuthUser {
   whatsapp?: string;
   pin?: string; // 4-6 digit security PIN or password for secure authentication
   isClassAdmin?: boolean; // Granted exclusively by Director
+  isOverallAdmin?: boolean; // Full oversight & admin across all classes (Directors)
   isAdminPromotedBy?: string;
   createdAt?: string;
   isAuthenticated: boolean;

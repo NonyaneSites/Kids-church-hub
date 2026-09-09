@@ -93,7 +93,12 @@ export function dbGetAccounts(): AuthUser[] {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        accounts = parsed;
+        accounts = parsed.map((acc: AuthUser) => {
+          if (acc.role === 'director' || (acc.role === 'admin' && acc.assignedClassId === 'all') || acc.isOverallAdmin) {
+            return { ...acc, isClassAdmin: true, isOverallAdmin: true };
+          }
+          return acc;
+        });
       }
     }
 

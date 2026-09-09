@@ -106,8 +106,8 @@ export const Navbar: React.FC<NavbarProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const isDirector = currentUser?.role === 'director' || (currentUser?.role === 'admin' && currentUser?.assignedClassId === 'all');
-  const isClassAdmin = Boolean(currentUser?.isClassAdmin) || (currentUser?.role === 'admin' && currentUser?.assignedClassId !== 'all');
+  const isDirector = currentUser?.role === 'director' || (currentUser?.role === 'admin' && currentUser?.assignedClassId === 'all') || Boolean(currentUser?.isOverallAdmin);
+  const isClassAdmin = isDirector || Boolean(currentUser?.isClassAdmin) || (currentUser?.role === 'admin') || (currentUser?.role as string) === 'class-admin';
   const canCreateAccounts = isDirector || isClassAdmin;
   const isTechOnly = currentUser?.role === 'tech';
   const isPresenterOnly = currentUser?.role === 'presenter';

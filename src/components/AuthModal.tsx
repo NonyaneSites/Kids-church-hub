@@ -96,8 +96,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onRevokeClassAdmin,
   initialTab = 'quick_switch',
 }) => {
-  const isDirector = currentUser?.role === 'director' || (currentUser?.role === 'admin' && currentUser?.assignedClassId === 'all');
-  const isClassAdmin = Boolean(currentUser?.isClassAdmin) || (currentUser?.role === 'admin' && currentUser?.assignedClassId !== 'all') || (currentUser?.role as string) === 'class-admin';
+  const isDirector = currentUser?.role === 'director' || (currentUser?.role === 'admin' && currentUser?.assignedClassId === 'all') || Boolean(currentUser?.isOverallAdmin);
+  const isClassAdmin = isDirector || Boolean(currentUser?.isClassAdmin) || (currentUser?.role === 'admin') || (currentUser?.role as string) === 'class-admin';
   const canCreateAccounts = isDirector || isClassAdmin;
 
   const [activeTab, setActiveTab] = useState<'quick_switch' | 'login' | 'register' | 'manage' | 'permissions'>(
