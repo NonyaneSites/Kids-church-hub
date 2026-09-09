@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Clock,
   Radio,
@@ -23,7 +23,8 @@ import {
   Layers,
   AlertTriangle
 } from 'lucide-react';
-import { ServiceSegment, QuickMessageType, QuickStagePreset, Role, StageCueBroadcast } from '../types/hub';
+import { ServiceSegment, QuickMessageType, QuickStagePreset, Role, StageCueBroadcast, ClassId } from '../types/hub';
+import { saveServiceSessionDebounced, sendSupabaseClassBroadcast } from '../lib/supabase';
 
 interface CommsDashboardProps {
   segments: ServiceSegment[];
@@ -55,6 +56,8 @@ interface CommsDashboardProps {
   dismissCue?: (id: string) => void;
   onCopyCue?: (id: string) => void;
   currentUserId?: string;
+  classId?: ClassId | 'all';
+  sessionId?: string;
 }
 
 export const CommsDashboard: React.FC<CommsDashboardProps> = ({
@@ -80,7 +83,47 @@ export const CommsDashboard: React.FC<CommsDashboardProps> = ({
   dismissCue,
   onCopyCue,
   currentUserId,
+  classId = 'kb',
+  sessionId = 'live-service',
 }) => {
+  // EGRESS SAFEGUARD: Local state for UI optimism
+  const [localSegments, setLocalSegments] = useState<ServiceSegment[]>(segments);
+
+  useEffect(() => {
+    setLocalSegments(segments);
+  }, [segments]);
+
+  const handleMarkSegmentComplete = (segmentId: string) => {
+    const roomKey = classId === 'all' ? 'kb' : classId;
+
+    // 1. UI Optimism: update local React state instantly
+    setLocalSegments((prev) =>
+      prev.map((s) => (s.id === segmentId ? { ...s, status: 'completed' as const } : s))
+    );
+
+    // 2. Send 200-byte lightweight broadcast event to peer iPads
+    sendSupabaseClassBroadcast(sessionId, roomKey, 'SEGMENT_STATUS_UPDATE', {
+      segmentId,
+      status: 'completed',
+      classId: roomKey,
+      timestamp: Date.now(),
+    }).catch(() => {});
+
+    // 3. Debounce Database writes (3000ms debounce to prevent rapid-fire Postgres writes)
+    saveServiceSessionDebounced(
+      sessionId,
+      {
+        currentSegmentId: segmentId,
+        status: 'completed',
+        classId: roomKey,
+        targetEndTime: localTimer.targetEndTimeFormatted,
+      },
+      3000
+    );
+
+    // Call parent handler
+    completeSegment(segmentId);
+  };
   const [customCueText, setCustomCueText] = useState('');
   const [selectedRecipient, setSelectedRecipient] = useState('Tech Crew');
   const [customNotificationText, setCustomNotificationText] = useState('');
@@ -298,7 +341,7 @@ export const CommsDashboard: React.FC<CommsDashboardProps> = ({
                 )}
               </div>
             ) : (
-              segments.map((seg, idx) => (
+              localSegments.map((seg, idx) => (
                 <div
                   key={seg.id}
                   className={`p-3 rounded-xl border transition-all text-xs space-y-1.5 ${
@@ -356,7 +399,7 @@ export const CommsDashboard: React.FC<CommsDashboardProps> = ({
 
                     {seg?.status === 'in-progress' && (
                       <button
-                        onClick={() => completeSegment(seg.id)}
+                        onClick={() => handleMarkSegmentComplete(seg.id)}
                         className="px-2.5 py-1 rounded-lg bg-emerald-600/30 hover:bg-emerald-600 text-emerald-200 hover:text-white font-bold text-[10px] flex items-center gap-1 transition-all"
                       >
                         <Check className="w-3 h-3" />

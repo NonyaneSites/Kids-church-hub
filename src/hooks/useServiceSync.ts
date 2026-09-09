@@ -50,10 +50,16 @@ import {
   subscribeToSupabaseAccounts,
   subscribeToSupabaseHubBroadcast,
   sendSupabaseHubBroadcast,
+  subscribeToSupabaseClassBroadcast,
+  sendSupabaseClassBroadcast,
+  saveServiceSessionDebounced,
+  saveChecklistItemsDebounced,
+  flushChecklistItems,
+  flushServiceSession,
   getLatestDatabaseDiagnostics,
   DatabaseDiagnostics,
+  dbSyncRemoteAccounts,
 } from '../lib/supabase';
-import { dbSyncRemoteAccounts } from '../lib/database';
 import { CLASSES_CONFIG, getAllDefaultClassHubs } from '../data/classHubsData';
 
 // Persistent storage keys
@@ -112,7 +118,11 @@ export function getMostRecentMonday(): string {
 const CHANNEL_NAME = 'kids_church_service_hub_channel';
 
 
-export function useServiceSync(activeRoleProp: Role = 'admin') {
+export function useServiceSync(
+  activeRoleProp: Role = 'admin',
+  classIdProp?: ClassId | 'all',
+  sessionId: string = 'live-service'
+) {
   // Authentication & Role State
   const [authUser, setAuthUser] = useState<AuthUser>(() => getStoredAuthUser());
 
@@ -141,18 +151,28 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
 
   // Selected Active Class Hub
   const [selectedClassId, setSelectedClassId] = useState<ClassId>(() => {
+    if (classIdProp && classIdProp !== 'all') {
+      return classIdProp as ClassId;
+    }
     try {
       const saved = localStorage.getItem('kch_selected_class_id');
       if (saved && ['jy', 'tb', 'kb', 'la-orange', 'la-yellow', 'all'].includes(saved)) {
-        return saved as ClassId;
+        return (saved === 'all' ? 'kb' : saved) as ClassId;
       }
     } catch (e) {}
     const auth = getStoredAuthUser();
     if (auth.assignedClassId && auth.assignedClassId !== 'all') {
-      return auth.assignedClassId;
+      return auth.assignedClassId as ClassId;
     }
     return 'kb';
   });
+
+  // Sync with classIdProp if passed from router / ClassContext
+  useEffect(() => {
+    if (classIdProp && classIdProp !== 'all' && classIdProp !== selectedClassId) {
+      setSelectedClassId(classIdProp as ClassId);
+    }
+  }, [classIdProp, selectedClassId]);
 
   const activeHubKey: ClassId = selectedClassId === 'all' ? 'kb' : selectedClassId;
   const initialHubData = allClassHubs[activeHubKey] || allClassHubs.kb;
@@ -710,11 +730,19 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
       }
     }
 
-    // 2. Real cross-device Supabase Realtime Channel send: reaches phones, tablets, stage computers!
-    sendSupabaseHubBroadcast(event, message).catch((err) => {
-      console.warn(`[Supabase Realtime Broadcast Error for ${event}]:`, err);
+    // 2. Class/Room-Isolated Supabase Realtime Channel:
+    // Strictly partitions traffic to stage_cues:${sessionId}:${classId}
+    const effectiveClass = selectedClassId === 'all' ? 'kb' : selectedClassId;
+    sendSupabaseClassBroadcast(sessionId, effectiveClass, event, message).catch((err) => {
+      console.warn(`[Supabase Class Broadcast Error for ${event}]:`, err);
     });
-  }, []);
+
+    // Also send on global channel if user is director or event is an emergency/all alert
+    if (selectedClassId === 'all' || event === 'EMERGENCY_OVERRIDE' || event === 'DIRECTOR_ANNOUNCEMENT') {
+      sendSupabaseClassBroadcast(sessionId, 'all', event, message).catch(() => {});
+      sendSupabaseHubBroadcast(event, message).catch(() => {});
+    }
+  }, [sessionId, selectedClassId]);
 
   // Initialize Broadcast Channel listener for instant cross-tab / cross-window sync
   useEffect(() => {
@@ -732,9 +760,11 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
     }
   }, [handleIncomingBroadcast]);
 
-  // Connect to Supabase Realtime Broadcast Channel for true multi-device synchronization
+  // Connect to Class/Room Scoped Supabase Realtime Broadcast Channel (stage_cues:${sessionId}:${classId})
   useEffect(() => {
-    const unsubscribeHub = subscribeToSupabaseHubBroadcast((message) => {
+    const effectiveClass = selectedClassId === 'all' ? 'kb' : selectedClassId;
+
+    const handleMessage = (message: any) => {
       const rawPayload = message?.payload as any;
       const eventName = rawPayload?.event || message?.event;
       const senderId = rawPayload?.senderId;
@@ -758,12 +788,23 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
       if (normalizedEvent.event) {
         handleIncomingBroadcast(normalizedEvent);
       }
-    });
+    };
+
+    // Subscribe to specific room channel
+    const unsubscribeClass = subscribeToSupabaseClassBroadcast(sessionId, effectiveClass, handleMessage);
+
+    // Also subscribe to 'all' for director/emergency directives
+    const unsubscribeAll = subscribeToSupabaseClassBroadcast(sessionId, 'all', handleMessage);
+
+    // Global hub fallback
+    const unsubscribeHub = subscribeToSupabaseHubBroadcast(handleMessage);
 
     return () => {
+      unsubscribeClass();
+      unsubscribeAll();
       unsubscribeHub();
     };
-  }, [handleIncomingBroadcast]);
+  }, [sessionId, selectedClassId, handleIncomingBroadcast]);
 
   // Clean up expired stage cues every 2 seconds
   useEffect(() => {
@@ -1086,25 +1127,31 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
     [serviceState.totalSlides, dispatchBroadcast]
   );
 
-  // Pre-service checklist toggle
+  // Pre-service checklist toggle with 3000ms debounce egress safeguard
   const toggleChecklistItem = useCallback(
     (id: string) => {
       setChecklist((prev) => {
         const next = prev.map((item) => (item.id === id ? { ...item, isChecked: !item.isChecked } : item));
+        // Lightweight broadcast event for peers in the room
         dispatchBroadcast('CHECKLIST_UPDATE', next);
+        // Debounce database write by 3000ms
+        const roomKey = selectedClassId === 'all' ? 'kb' : selectedClassId;
+        saveChecklistItemsDebounced(roomKey, next, 3000);
         return next;
       });
     },
-    [dispatchBroadcast]
+    [dispatchBroadcast, selectedClassId]
   );
 
   const markAllChecksDone = useCallback(() => {
     setChecklist((prev) => {
       const next = prev.map((item) => ({ ...item, isChecked: true }));
       dispatchBroadcast('CHECKLIST_UPDATE', next);
+      const roomKey = selectedClassId === 'all' ? 'kb' : selectedClassId;
+      saveChecklistItemsDebounced(roomKey, next, 3000);
       return next;
     });
-  }, [dispatchBroadcast]);
+  }, [dispatchBroadcast, selectedClassId]);
 
   // Worship Queue Control
   const setWorshipSong = useCallback(
@@ -1121,7 +1168,7 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
     [dispatchBroadcast]
   );
 
-  // Service Segment Progression
+  // Service Segment Progression with target_end_time
   const startSegment = useCallback(
     (segmentId: string, durationMinutes?: number) => {
       const targetSeg = segments.find((s) => s.id === segmentId);
@@ -1146,23 +1193,51 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
       );
 
       dispatchBroadcast('SERVICE_STATE_UPDATE', updatedState);
+
+      // Debounce Database write for service_sessions
+      const roomKey = selectedClassId === 'all' ? 'kb' : selectedClassId;
+      saveServiceSessionDebounced(sessionId, {
+        currentSegmentId: segmentId,
+        targetEndTime: targetEnd,
+        classId: roomKey,
+        status: 'live',
+      }, 3000);
     },
-    [segments, serviceState, dispatchBroadcast]
+    [segments, serviceState, dispatchBroadcast, selectedClassId, sessionId]
   );
 
   const completeSegment = useCallback(
     (segmentId: string) => {
+      // 1. UI Optimism: update local React state instantly
       setSegments((prev) =>
         prev.map((s) => (s.id === segmentId ? { ...s, status: 'completed' } : s))
       );
+
+      // 2. Send 200-byte lightweight broadcast event to peer iPads
+      dispatchBroadcast('SEGMENT_STATUS_UPDATE' as any, {
+        segmentId,
+        status: 'completed',
+        classId: selectedClassId,
+        timestamp: Date.now(),
+      });
+
       // Auto move to next if available
       const currentIndex = segments.findIndex((s) => s.id === segmentId);
       const nextSeg = segments[currentIndex + 1];
       if (nextSeg) {
         startSegment(nextSeg.id);
       }
+
+      // 3. Debounce Database Writes: 3000ms debounce timer for service_sessions
+      const roomKey = selectedClassId === 'all' ? 'kb' : selectedClassId;
+      saveServiceSessionDebounced(sessionId, {
+        currentSegmentId: nextSeg?.id || null,
+        targetEndTime: nextSeg ? serviceState.targetEndTime : null,
+        classId: roomKey,
+        status: nextSeg ? 'live' : 'completed',
+      }, 3000);
     },
-    [segments, startSegment]
+    [segments, startSegment, dispatchBroadcast, selectedClassId, sessionId, serviceState.targetEndTime]
   );
 
   // Switch between Class Hubs

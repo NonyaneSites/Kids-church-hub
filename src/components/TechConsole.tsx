@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Tv,
   CheckCircle2,
@@ -32,8 +32,10 @@ import {
   LessonNotesData,
   IncidentLog,
   StageCueBroadcast,
-  CommsEmergencyAlert
+  CommsEmergencyAlert,
+  ClassId
 } from '../types/hub';
+import { flushChecklistItems } from '../lib/supabase';
 
 interface TechConsoleProps {
   checklist: PreServiceCheckItem[];
@@ -60,6 +62,7 @@ interface TechConsoleProps {
   onAddIncident?: (description: string, severity: 'low' | 'medium' | 'critical') => void;
   onResolveIncident?: (id: string) => void;
   isClassAdmin?: boolean;
+  classId?: ClassId | 'all';
 }
 
 export const TechConsole: React.FC<TechConsoleProps> = ({
@@ -87,7 +90,55 @@ export const TechConsole: React.FC<TechConsoleProps> = ({
   onAddIncident,
   onResolveIncident,
   isClassAdmin = false,
+  classId = 'kb',
 }) => {
+  // EGRESS SAFEGUARD: Local state + Save on Unmount + 3000ms idle timer debounce
+  const [localChecklist, setLocalChecklist] = useState<PreServiceCheckItem[]>(checklist);
+  const pendingTogglesRef = useRef<Map<string, boolean>>(new Map());
+  const debounceTimerRef = useRef<any>(null);
+
+  useEffect(() => {
+    setLocalChecklist(checklist);
+  }, [checklist]);
+
+  // Save on Unmount: user switches away from the tab or navigates out
+  useEffect(() => {
+    return () => {
+      const roomKey = classId === 'all' ? 'kb' : classId;
+      if (pendingTogglesRef.current.size > 0) {
+        flushChecklistItems(roomKey);
+      }
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, [classId]);
+
+  const handleToggleChecklist = (itemId: string) => {
+    const roomKey = classId === 'all' ? 'kb' : classId;
+
+    // 1. Instant local UI update
+    setLocalChecklist((prev) =>
+      prev.map((item) => (item.id === itemId ? { ...item, isChecked: !item.isChecked } : item))
+    );
+
+    // 2. Accumulate locally in ref
+    const targetItem = localChecklist.find((it) => it.id === itemId);
+    const newChecked = !targetItem?.isChecked;
+    pendingTogglesRef.current.set(itemId, newChecked);
+
+    // 3. Trigger parent toggle (broadcasts 200-byte event to other iPads in the room)
+    toggleChecklistItem(itemId);
+
+    // 4. Idle debounce timer (3000ms)
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    debounceTimerRef.current = setTimeout(() => {
+      flushChecklistItems(roomKey);
+      pendingTogglesRef.current.clear();
+    }, 3000);
+  };
   // Add Checklist Modal State (for Class Admin)
   const [showAddChecklistModal, setShowAddChecklistModal] = useState(false);
   const [newChecklistLabel, setNewChecklistLabel] = useState('');
@@ -223,7 +274,7 @@ export const TechConsole: React.FC<TechConsoleProps> = ({
             </div>
             <div className="flex items-center gap-2">
               <span className="text-[11px] font-mono text-purple-300 bg-black/40 px-2 py-0.5 rounded-lg border border-white/10">
-                {checklist.filter((c) => c.isChecked).length} / {checklist.length}
+                {localChecklist.filter((c) => c.isChecked).length} / {localChecklist.length}
               </span>
               {isClassAdmin && addChecklistItem && (
                 <button
@@ -239,7 +290,7 @@ export const TechConsole: React.FC<TechConsoleProps> = ({
 
           {/* Checklist Items */}
           <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
-            {checklist.length === 0 ? (
+            {localChecklist.length === 0 ? (
               <div className="p-4 rounded-xl bg-white/5 border border-dashed border-white/10 text-center text-xs text-gray-400 space-y-2">
                 <CheckCircle2 className="w-6 h-6 mx-auto text-gray-500 opacity-60" />
                 <p>Checklist is blank.</p>
@@ -253,7 +304,7 @@ export const TechConsole: React.FC<TechConsoleProps> = ({
                 )}
               </div>
             ) : (
-              checklist.map((item) => (
+              localChecklist.map((item) => (
                 <div
                   key={item.id}
                   className={`w-full p-2.5 rounded-xl border flex items-center justify-between transition-all ${
@@ -264,7 +315,7 @@ export const TechConsole: React.FC<TechConsoleProps> = ({
                 >
                   <button
                     id={`chk-item-${item.id}`}
-                    onClick={() => toggleChecklistItem(item.id)}
+                    onClick={() => handleToggleChecklist(item.id)}
                     className="flex items-center gap-2.5 flex-1 text-left"
                   >
                     <div

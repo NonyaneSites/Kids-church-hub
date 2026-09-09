@@ -354,6 +354,204 @@ export async function sendSupabaseHubBroadcast<T>(event: string, payload: T): Pr
 }
 
 // -------------------------------------------------------------
+// CLASS/ROOM-ISOLATED REAL-TIME BROADCAST CHANNELS
+// Prevents cross-room walkie/cue spillover (e.g. JY vs TB)
+// Pattern: stage_cues:${sessionId}:${classId}
+// -------------------------------------------------------------
+const classChannelsMap = new Map<string, RealtimeChannel>();
+const classListenersMap = new Map<string, Set<(message: { event: string; payload: any }) => void>>();
+
+export function getSupabaseClassChannel(
+  sessionId: string = 'live-service',
+  classId: string = 'kb'
+): RealtimeChannel | null {
+  const supabase = getSupabaseClient();
+  if (!supabase) return null;
+
+  const channelKey = `stage_cues:${sessionId}:${classId}`;
+  const existing = classChannelsMap.get(channelKey);
+  if (existing) {
+    return existing;
+  }
+
+  try {
+    const channel = supabase.channel(channelKey, {
+      config: {
+        broadcast: {
+          self: false,
+          ack: true,
+        },
+      },
+    });
+
+    channel.on('broadcast', { event: '*' }, (message: { event: string; payload: any }) => {
+      const listeners = classListenersMap.get(channelKey);
+      if (listeners) {
+        listeners.forEach((listener) => {
+          try {
+            listener(message);
+          } catch (e) {
+            console.warn(`Error in class listener for ${channelKey}:`, e);
+          }
+        });
+      }
+    });
+
+    channel.subscribe((status: string) => {
+      console.debug(`[Supabase Class Channel: ${channelKey}] Status:`, status);
+    });
+
+    classChannelsMap.set(channelKey, channel);
+    return channel;
+  } catch (err) {
+    console.warn(`Failed to initialize class channel for ${channelKey}:`, err);
+    return null;
+  }
+}
+
+export function subscribeToSupabaseClassBroadcast(
+  sessionId: string = 'live-service',
+  classId: string = 'kb',
+  onBroadcast: (message: { event: string; payload: any }) => void
+): () => void {
+  const channelKey = `stage_cues:${sessionId}:${classId}`;
+  if (!classListenersMap.has(channelKey)) {
+    classListenersMap.set(channelKey, new Set());
+  }
+  const set = classListenersMap.get(channelKey)!;
+  set.add(onBroadcast);
+
+  getSupabaseClassChannel(sessionId, classId);
+
+  return () => {
+    set.delete(onBroadcast);
+  };
+}
+
+export async function sendSupabaseClassBroadcast<T>(
+  sessionId: string = 'live-service',
+  classId: string = 'kb',
+  event: string,
+  payload: T
+): Promise<boolean> {
+  const channel = getSupabaseClassChannel(sessionId, classId);
+  if (!channel) return false;
+
+  try {
+    const res = await channel.send({
+      type: 'broadcast',
+      event,
+      payload,
+    });
+    return res === 'ok';
+  } catch (err) {
+    console.warn(`[Supabase Class Broadcast Error on ${sessionId}:${classId} for ${event}]:`, err);
+    return false;
+  }
+}
+
+// -------------------------------------------------------------
+// STRICT EGRESS PROTECTION: 3000ms DEBOUNCED DATABASE WRITES
+// Prevents rapid-fire Postgres writes when ticking segments or checklist
+// -------------------------------------------------------------
+const sessionDebounceTimers = new Map<string, any>();
+const pendingSessionUpdates = new Map<string, any>();
+
+export function saveServiceSessionDebounced(
+  sessionId: string,
+  sessionData: any,
+  delayMs = 3000
+): void {
+  try {
+    localStorage.setItem(`kch_session_state_${sessionId}`, JSON.stringify(sessionData));
+  } catch (e) {}
+
+  pendingSessionUpdates.set(sessionId, sessionData);
+
+  if (sessionDebounceTimers.has(sessionId)) {
+    clearTimeout(sessionDebounceTimers.get(sessionId));
+  }
+
+  const timer = setTimeout(() => {
+    sessionDebounceTimers.delete(sessionId);
+    flushServiceSession(sessionId);
+  }, delayMs);
+
+  sessionDebounceTimers.set(sessionId, timer);
+}
+
+export async function flushServiceSession(sessionId: string): Promise<void> {
+  const data = pendingSessionUpdates.get(sessionId);
+  if (!data) return;
+  pendingSessionUpdates.delete(sessionId);
+
+  const supabase = getSupabaseClient();
+  if (!supabase) return;
+
+  try {
+    await supabase.from('service_sessions').upsert({
+      id: sessionId,
+      target_end_time: data.targetEndTime || data.target_end_time || null,
+      current_segment_id: data.currentSegmentId || data.current_segment_id || null,
+      status: data.status || 'live',
+      class_id: data.classId || data.class_id || 'kb',
+      updated_at: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.debug('[Debounced session upsert notice]:', err);
+  }
+}
+
+const checklistDebounceTimers = new Map<string, any>();
+const pendingChecklistUpdates = new Map<string, any[]>();
+
+export function saveChecklistItemsDebounced(
+  classId: string,
+  items: any[],
+  delayMs = 3000
+): void {
+  try {
+    localStorage.setItem(`kch_checklist_${classId}`, JSON.stringify(items));
+  } catch (e) {}
+
+  pendingChecklistUpdates.set(classId, items);
+
+  if (checklistDebounceTimers.has(classId)) {
+    clearTimeout(checklistDebounceTimers.get(classId));
+  }
+
+  const timer = setTimeout(() => {
+    checklistDebounceTimers.delete(classId);
+    flushChecklistItems(classId);
+  }, delayMs);
+
+  checklistDebounceTimers.set(classId, timer);
+}
+
+export async function flushChecklistItems(classId: string): Promise<void> {
+  const items = pendingChecklistUpdates.get(classId);
+  if (!items || items.length === 0) return;
+  pendingChecklistUpdates.delete(classId);
+
+  const supabase = getSupabaseClient();
+  if (!supabase) return;
+
+  try {
+    const rows = items.map((item) => ({
+      id: item.id,
+      class_id: classId,
+      label: item.label,
+      is_checked: Boolean(item.isChecked),
+      category: item.category || 'general',
+      updated_at: new Date().toISOString(),
+    }));
+    await supabase.from('checklist_items').upsert(rows);
+  } catch (err) {
+    console.debug('[Debounced checklist upsert notice]:', err);
+  }
+}
+
+// -------------------------------------------------------------
 // POSTGRES TABLE SETUP SCRIPT FOR USER TO RUN IN SUPABASE SQL EDITOR
 // -------------------------------------------------------------
 export const SUPABASE_STAFF_ACCOUNTS_SQL = `-- ========================================================
@@ -1177,13 +1375,255 @@ export const PRECONFIGURED_USERS: AuthUser[] = [
   },
 ];
 
-import {
-  dbGetAccounts,
-  dbSaveAccount,
-  dbDeleteAccount,
-  dbClearDefaultAccounts,
-  dbResetDefaultAccounts,
-} from './database';
+// -------------------------------------------------------------
+// PERSISTENT CLIENT ACCOUNTS STORAGE (INDEXEDDB & LOCALSTORAGE)
+// Zero external egress - local offline-first with Supabase sync
+// -------------------------------------------------------------
+const DB_NAME = 'CRCKidsChurchDB';
+const DB_VERSION = 1;
+const STORE_ACCOUNTS = 'accounts';
+const STORE_META = 'metadata';
+
+const LOCAL_STORAGE_ACCOUNTS_KEY = 'crc_kids_church_accounts_db_v6';
+const LOCAL_STORAGE_CLEARED_FLAG = 'crc_kids_church_seed_cleared_v6';
+
+let idbInstance: IDBDatabase | null = null;
+
+function openIndexedDB(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    if (typeof window === 'undefined' || !window.indexedDB) {
+      return reject(new Error('IndexedDB not supported'));
+    }
+    if (idbInstance) {
+      return resolve(idbInstance);
+    }
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      idbInstance = request.result;
+      resolve(idbInstance);
+    };
+    request.onupgradeneeded = (event: IDBVersionChangeEvent) => {
+      const db = (event.target as IDBOpenDBRequest).result;
+      if (!db.objectStoreNames.contains(STORE_ACCOUNTS)) {
+        db.createObjectStore(STORE_ACCOUNTS, { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains(STORE_META)) {
+        db.createObjectStore(STORE_META, { keyPath: 'key' });
+      }
+    };
+  });
+}
+
+function syncToIndexedDB(accounts: AuthUser[]): void {
+  openIndexedDB()
+    .then((db) => {
+      const tx = db.transaction([STORE_ACCOUNTS], 'readwrite');
+      const store = tx.objectStore(STORE_ACCOUNTS);
+      store.clear();
+      accounts.forEach((acc) => store.put(acc));
+    })
+    .catch(() => {});
+}
+
+export function dbGetAccounts(): AuthUser[] {
+  try {
+    const isCleared = localStorage.getItem(LOCAL_STORAGE_CLEARED_FLAG) === 'true';
+    const raw = localStorage.getItem(LOCAL_STORAGE_ACCOUNTS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+      if (Array.isArray(parsed) && parsed.length === 0 && isCleared) {
+        return [];
+      }
+    }
+    if (isCleared) {
+      return [];
+    }
+  } catch (e) {
+    console.warn('LocalStorage accounts read warning:', e);
+  }
+  return DEFAULT_USERS;
+}
+
+export function dbSaveAccount(user: AuthUser): AuthUser[] {
+  const current = dbGetAccounts();
+  const existingIdx = current.findIndex((u) => u.id === user.id);
+  let updated: AuthUser[];
+  if (existingIdx >= 0) {
+    updated = [...current];
+    updated[existingIdx] = { ...current[existingIdx], ...user };
+  } else {
+    updated = [...current, user];
+  }
+  try {
+    localStorage.removeItem(LOCAL_STORAGE_CLEARED_FLAG);
+    localStorage.setItem(LOCAL_STORAGE_ACCOUNTS_KEY, JSON.stringify(updated));
+  } catch (e) {}
+  syncToIndexedDB(updated);
+  return updated;
+}
+
+export function dbDeleteAccount(userId: string): AuthUser[] {
+  const current = dbGetAccounts();
+  const updated = current.filter((u) => u.id !== userId);
+  try {
+    if (updated.length === 0) {
+      localStorage.setItem(LOCAL_STORAGE_CLEARED_FLAG, 'true');
+    }
+    localStorage.setItem(LOCAL_STORAGE_ACCOUNTS_KEY, JSON.stringify(updated));
+  } catch (e) {}
+  syncToIndexedDB(updated);
+  return updated;
+}
+
+export function dbSyncRemoteAccounts(remoteAccounts: AuthUser[]): AuthUser[] {
+  if (!Array.isArray(remoteAccounts) || remoteAccounts.length === 0) {
+    return dbGetAccounts();
+  }
+  try {
+    localStorage.removeItem(LOCAL_STORAGE_CLEARED_FLAG);
+    localStorage.setItem(LOCAL_STORAGE_ACCOUNTS_KEY, JSON.stringify(remoteAccounts));
+  } catch (e) {}
+  syncToIndexedDB(remoteAccounts);
+  return remoteAccounts;
+}
+
+// Backward-compatible alias for any legacy callers
+export const dbSyncFirestoreAccounts = dbSyncRemoteAccounts;
+
+export const DEFAULT_USERS: AuthUser[] = PRECONFIGURED_USERS;
+
+export function dbClearDefaultAccounts(): AuthUser[] {
+  try {
+    localStorage.setItem(LOCAL_STORAGE_CLEARED_FLAG, 'true');
+    localStorage.setItem(LOCAL_STORAGE_ACCOUNTS_KEY, JSON.stringify([]));
+  } catch (e) {}
+  openIndexedDB().then((db) => {
+    const tx = db.transaction([STORE_ACCOUNTS], 'readwrite');
+    tx.objectStore(STORE_ACCOUNTS).clear();
+  }).catch(() => {});
+  return [];
+}
+
+export function dbResetDefaultAccounts(): AuthUser[] {
+  try {
+    localStorage.removeItem(LOCAL_STORAGE_CLEARED_FLAG);
+    localStorage.setItem(LOCAL_STORAGE_ACCOUNTS_KEY, JSON.stringify(DEFAULT_USERS));
+  } catch (e) {}
+  syncToIndexedDB(DEFAULT_USERS);
+  return DEFAULT_USERS;
+}
+
+export interface DbSyncResult {
+  synced: boolean;
+  accounts: AuthUser[];
+  error?: {
+    message: string;
+    timestamp?: string;
+    requestedUrl?: string;
+    httpStatus?: number;
+    httpStatusText?: string;
+    responseSnippet?: string;
+    sdkError?: any;
+  } | null;
+  source: 'indexeddb' | 'localstorage' | 'supabase' | 'default_seed';
+  count: number;
+}
+
+export async function dbSyncWithSupabase(): Promise<DbSyncResult> {
+  try {
+    const detailed = await fetchAccountsDetailedFromSupabase();
+    if (detailed.success && detailed.data && detailed.data.length > 0) {
+      dbSyncRemoteAccounts(detailed.data);
+      return {
+        synced: true,
+        accounts: detailed.data,
+        source: 'supabase',
+        count: detailed.data.length,
+      };
+    }
+    const local = dbGetAccounts();
+    return {
+      synced: false,
+      accounts: local,
+      source: local.length > 0 ? 'localstorage' : 'default_seed',
+      count: local.length,
+      error: detailed.error ? {
+        message: detailed.error.message || 'Supabase remote unavailable',
+        timestamp: detailed.error.timestamp,
+        requestedUrl: detailed.error.requestedUrl,
+        httpStatus: detailed.error.httpStatus,
+        httpStatusText: detailed.error.httpStatusText,
+        responseSnippet: detailed.error.responseSnippet,
+        sdkError: detailed.error.sdkError,
+      } : { message: 'Supabase remote unavailable, using local accounts' },
+    };
+  } catch (e: any) {
+    const local = dbGetAccounts();
+    return {
+      synced: false,
+      accounts: local,
+      source: 'localstorage',
+      count: local.length,
+      error: { message: e?.message || 'Sync failed' },
+    };
+  }
+}
+
+export function getDatabaseStatus(): {
+  isSupported: boolean;
+  type: string;
+  accountsCount: number;
+} {
+  const accounts = dbGetAccounts();
+  return {
+    isSupported: typeof window !== 'undefined' && ('indexedDB' in window || 'localStorage' in window),
+    type: 'Supabase + IndexedDB Cache',
+    accountsCount: accounts.length,
+  };
+}
+
+export function updateAccountAdminStatus(
+  userId: string,
+  isClassAdmin: boolean,
+  promotedByName?: string
+): AuthUser[] {
+  const accounts = dbGetAccounts();
+  const updated = accounts.map((acc) => {
+    if (acc.id === userId) {
+      return {
+        ...acc,
+        isClassAdmin,
+        adminPromotedBy: promotedByName,
+        adminPromotedAt: isClassAdmin ? new Date().toISOString() : undefined,
+      };
+    }
+    return acc;
+  });
+  try {
+    localStorage.setItem(LOCAL_STORAGE_ACCOUNTS_KEY, JSON.stringify(updated));
+  } catch (e) {}
+  syncToIndexedDB(updated);
+  return updated;
+}
+
+export function updateAccountPin(userId: string, pin: string): AuthUser[] {
+  const accounts = dbGetAccounts();
+  const updated = accounts.map((acc) => {
+    if (acc.id === userId) {
+      return { ...acc, pin };
+    }
+    return acc;
+  });
+  try {
+    localStorage.setItem(LOCAL_STORAGE_ACCOUNTS_KEY, JSON.stringify(updated));
+  } catch (e) {}
+  syncToIndexedDB(updated);
+  return updated;
+}
 
 export function getStoredAccountsList(): AuthUser[] {
   return dbGetAccounts();
@@ -1494,14 +1934,6 @@ export function saveStoredTemplates(templates: ServiceTemplate[]): void {
     console.warn('Error saving templates:', e);
   }
 }
-
-// Re-export persistent database accounts engine & status helper
-export { 
-  getDatabaseStatus, 
-  updateAccountAdminStatus, 
-  updateAccountPin,
-  dbSyncWithSupabase,
-} from './database';
 
 export function broadcastIncidentRealtime(event: RealtimeIncidentEvent): void {
   sendSupabaseHubBroadcast('incident_event', event).catch((err) => {
