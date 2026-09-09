@@ -33,23 +33,46 @@ export function isLikelySupabaseKey(key: string): boolean {
 }
 
 /**
- * Validates whether a given string is a Supabase HTTP(S) URL.
+ * Validates whether a given string is a valid Supabase HTTP(S) URL with a real hostname.
+ * Hardened to reject bracketed markdown, truncated prefixes (e.g. "https://[https:"),
+ * or strings missing a proper domain name.
  */
 export function isLikelySupabaseUrl(url: string): boolean {
-  if (!url) return false;
-  const trimmed = url.trim();
-  return trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.includes('.supabase.co');
+  if (!url || typeof url !== 'string') return false;
+  const clean = url.trim().replace(/[\r\n\t\[\]"'`]/g, '');
+  if (!clean || clean.includes('[') || clean.includes(']')) return false;
+
+  try {
+    const candidate = clean.startsWith('http://') || clean.startsWith('https://')
+      ? clean
+      : 'https://' + clean;
+    const parsed = new URL(candidate);
+    return (
+      (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+      Boolean(parsed.hostname) &&
+      parsed.hostname.length >= 4 &&
+      parsed.hostname.includes('.') &&
+      !parsed.hostname.includes(':') &&
+      !parsed.hostname.includes('[')
+    );
+  } catch (e) {
+    return false;
+  }
 }
 
 /**
- * Strips /rest/v1, trailing slashes, and paths so Supabase client gets the base origin URL
+ * Strips /rest/v1, trailing slashes, markdown brackets, quotes, and paths
+ * so Supabase client and REST fetch get a pristine base origin URL.
  * e.g. "https://ifyhflqwdlgnqfryojxi.supabase.co/rest/v1/" -> "https://ifyhflqwdlgnqfryojxi.supabase.co"
- * Hardened to prevent WebKit/Safari DOMException (SyntaxError 12) on malformed inputs.
+ * Guarantees that malformed inputs like "https://[https:" return empty string.
  */
 export function sanitizeSupabaseUrl(rawUrl: string): string {
   if (!rawUrl || typeof rawUrl !== 'string') return '';
-  let url = rawUrl.trim().replace(/[\r\n\t]/g, '');
+  let url = rawUrl.trim().replace(/[\r\n\t\[\]"'`]/g, '');
   if (!url) return '';
+
+  // Clean up any double-scheme prefixes e.g. "https://https://"
+  url = url.replace(/^(https?:\/\/)+(https?:\/\/)+/i, '$2');
 
   // Ensure scheme is present before parsing
   if (!url.startsWith('http://') && !url.startsWith('https://')) {
@@ -58,22 +81,23 @@ export function sanitizeSupabaseUrl(rawUrl: string): string {
 
   try {
     const parsed = new URL(url);
-    return `${parsed.protocol}//${parsed.host}`;
-  } catch (e) {
-    // Regex-based URL extraction that never throws in WebKit/Safari
-    const match = url.match(/^(https?:\/\/[^\/\s?#]+)/i);
-    if (match) {
-      return match[1];
+    if (parsed.hostname && parsed.hostname.includes('.') && !parsed.hostname.includes('[')) {
+      return `${parsed.protocol}//${parsed.host}`;
     }
-    url = url.replace(/\/rest\/v1\/?.*$/, '');
-    url = url.replace(/\/+$/, '');
-    return url;
+  } catch (e) {}
+
+  // Strict regex fallback to extract protocol + valid hostname
+  const match = url.match(/^(https?:\/\/([a-zA-Z0-9_\-\.]+))/i);
+  if (match && match[2].includes('.')) {
+    return match[1];
   }
+
+  return '';
 }
 
 /**
  * Resolve active Supabase URL & Anon Key:
- * 1. In-app localStorage credentials (with automatic validation and auto-correction)
+ * 1. In-app localStorage credentials (with automatic validation, sanitization, and auto-purge of corrupt values)
  * 2. Environment variables (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY)
  * 3. Default production CRC Kids Church Hub Supabase project
  */
@@ -98,26 +122,37 @@ export function getSupabaseConfig(): {
         const temp = customUrl;
         customUrl = customKey;
         customKey = temp;
-        localStorage.setItem(STORAGE_SUPABASE_URL_KEY, sanitizeSupabaseUrl(customUrl));
-        localStorage.setItem(STORAGE_SUPABASE_KEY_KEY, customKey);
-      } else {
-        // Detect corrupt key (e.g. user pasted https://.../rest/v1/ into the API key field)
-        if (customKey && !isLikelySupabaseKey(customKey)) {
-          console.warn('[Supabase Config] Corrupted API key detected in localStorage (was a URL). Purging.');
-          localStorage.removeItem(STORAGE_SUPABASE_KEY_KEY);
-          customKey = '';
+        const sanitizedTemp = sanitizeSupabaseUrl(customUrl);
+        if (sanitizedTemp) {
+          localStorage.setItem(STORAGE_SUPABASE_URL_KEY, sanitizedTemp);
+          localStorage.setItem(STORAGE_SUPABASE_KEY_KEY, customKey);
         }
-        if (customUrl && !isLikelySupabaseUrl(customUrl)) {
-          console.warn('[Supabase Config] Corrupted URL detected in localStorage. Purging.');
+      }
+
+      // Detect and purge corrupt API key
+      if (customKey && !isLikelySupabaseKey(customKey)) {
+        console.warn('[Supabase Config] Corrupted API key detected in localStorage. Purging.');
+        localStorage.removeItem(STORAGE_SUPABASE_KEY_KEY);
+        customKey = '';
+      }
+
+      // Detect and purge corrupt URL (e.g. malformed "https://[https:" or bracketed strings)
+      if (customUrl) {
+        const sanitized = sanitizeSupabaseUrl(customUrl);
+        if (!sanitized || !isLikelySupabaseUrl(sanitized)) {
+          console.warn('[Supabase Config] Corrupted custom URL detected in localStorage. Purging:', customUrl);
           localStorage.removeItem(STORAGE_SUPABASE_URL_KEY);
           customUrl = '';
+        } else {
+          customUrl = sanitized;
         }
       }
     } catch (e) {}
   }
 
   const validEnvKey = isLikelySupabaseKey(envKey) ? envKey : '';
-  const validEnvUrl = isLikelySupabaseUrl(envUrl) ? envUrl : '';
+  const sanitizedEnvUrl = sanitizeSupabaseUrl(envUrl);
+  const validEnvUrl = isLikelySupabaseUrl(sanitizedEnvUrl) ? sanitizedEnvUrl : '';
 
   const rawUrl = (customUrl && isLikelySupabaseUrl(customUrl) ? customUrl : '') || validEnvUrl || DEFAULT_SUPABASE_URL;
   let anonKey = (customKey && isLikelySupabaseKey(customKey) ? customKey : '') || validEnvKey || DEFAULT_SUPABASE_ANON_KEY;
@@ -127,9 +162,11 @@ export function getSupabaseConfig(): {
     anonKey = DEFAULT_SUPABASE_ANON_KEY;
   }
 
-  const url = sanitizeSupabaseUrl(rawUrl) || DEFAULT_SUPABASE_URL;
+  // Guarantee url is non-empty and well-formed, falling back unconditionally to DEFAULT_SUPABASE_URL
+  const sanitizedUrl = sanitizeSupabaseUrl(rawUrl);
+  const url = (sanitizedUrl && isLikelySupabaseUrl(sanitizedUrl)) ? sanitizedUrl : DEFAULT_SUPABASE_URL;
   const isCustom = Boolean(customUrl && customKey && isLikelySupabaseKey(customKey));
-  const isConfigured = Boolean(url && anonKey && url.startsWith('http') && isLikelySupabaseKey(anonKey));
+  const isConfigured = Boolean(url && anonKey && isLikelySupabaseUrl(url) && isLikelySupabaseKey(anonKey));
 
   return {
     url,
@@ -543,9 +580,16 @@ export async function fetchAccountsDetailedFromSupabase(): Promise<SupabaseFetch
   }
 
   // 2. Direct REST fetch fallback (bypasses SDK channel state & WebSockets)
-  if (url && anonKey) {
-    const cleanUrl = sanitizeSupabaseUrl(url).trim().replace(/[\r\n\t]/g, '');
-    const cleanKey = anonKey.trim().replace(/[\r\n\t]/g, '');
+  let cleanUrl = sanitizeSupabaseUrl(url).trim().replace(/[\r\n\t]/g, '');
+  if (!isLikelySupabaseUrl(cleanUrl)) {
+    cleanUrl = DEFAULT_SUPABASE_URL;
+  }
+  let cleanKey = anonKey.trim().replace(/[\r\n\t]/g, '');
+  if (!isLikelySupabaseKey(cleanKey)) {
+    cleanKey = DEFAULT_SUPABASE_ANON_KEY;
+  }
+
+  if (cleanUrl && cleanKey) {
     // Full requested URL with domain and path
     const restEndpoint = `${cleanUrl}/rest/v1/staff_accounts?select=%2A&order=created_at.desc`;
     const controller = new AbortController();
