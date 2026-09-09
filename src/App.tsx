@@ -108,6 +108,7 @@ export default function App() {
     registeredAccounts,
     isSyncingAccounts,
     accountsSyncError,
+    accountsSyncDiagnostics,
     accountsFetchAttempted,
     addNewAccount,
     deleteUserAccount,
@@ -180,6 +181,7 @@ export default function App() {
         onAddNewAccount={addNewAccount}
         isSyncing={isSyncingAccounts}
         syncError={accountsSyncError}
+        syncDiagnostics={accountsSyncDiagnostics}
         onRefreshAccounts={syncAccountsWithCloud}
         fetchAttempted={accountsFetchAttempted}
       />

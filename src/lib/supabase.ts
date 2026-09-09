@@ -44,14 +44,27 @@ export function isLikelySupabaseUrl(url: string): boolean {
 /**
  * Strips /rest/v1, trailing slashes, and paths so Supabase client gets the base origin URL
  * e.g. "https://ifyhflqwdlgnqfryojxi.supabase.co/rest/v1/" -> "https://ifyhflqwdlgnqfryojxi.supabase.co"
+ * Hardened to prevent WebKit/Safari DOMException (SyntaxError 12) on malformed inputs.
  */
 export function sanitizeSupabaseUrl(rawUrl: string): string {
-  if (!rawUrl) return '';
-  let url = rawUrl.trim();
+  if (!rawUrl || typeof rawUrl !== 'string') return '';
+  let url = rawUrl.trim().replace(/[\r\n\t]/g, '');
+  if (!url) return '';
+
+  // Ensure scheme is present before parsing
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    url = 'https://' + url;
+  }
+
   try {
     const parsed = new URL(url);
     return `${parsed.protocol}//${parsed.host}`;
   } catch (e) {
+    // Regex-based URL extraction that never throws in WebKit/Safari
+    const match = url.match(/^(https?:\/\/[^\/\s?#]+)/i);
+    if (match) {
+      return match[1];
+    }
     url = url.replace(/\/rest\/v1\/?.*$/, '');
     url = url.replace(/\/+$/, '');
     return url;
@@ -162,10 +175,24 @@ export function clearCustomSupabaseConfig(): void {
   try {
     localStorage.removeItem(STORAGE_SUPABASE_URL_KEY);
     localStorage.removeItem(STORAGE_SUPABASE_KEY_KEY);
-    supabaseInstance = null;
-    hubChannelInstance = null;
-    accountsChannelInstance = null;
+    resetSupabaseClient();
   } catch (e) {}
+}
+
+export function resetSupabaseClient(): void {
+  try {
+    if (supabaseInstance && hubChannelInstance) {
+      try { supabaseInstance.removeChannel(hubChannelInstance); } catch (e) {}
+      hubChannelInstance = null;
+    }
+    if (supabaseInstance && accountsChannelInstance) {
+      try { supabaseInstance.removeChannel(accountsChannelInstance); } catch (e) {}
+      accountsChannelInstance = null;
+    }
+  } catch (e) {}
+  supabaseInstance = null;
+  currentClientKey = '';
+  currentHubClientKey = '';
 }
 
 let supabaseInstance: SupabaseClient | null = null;
@@ -423,6 +450,29 @@ export function mapAuthUserToRow(user: AuthUser): SupabaseRowAccount {
   };
 }
 
+export interface DatabaseDiagnostics {
+  timestamp: string;
+  requestedUrl: string;
+  httpStatus: number;
+  httpStatusText: string;
+  responseSnippet: string;
+  sdkError?: string;
+  clientUrlConfig?: string;
+  clientKeyPrefix?: string;
+  errorType?: string;
+  rawErrorMessage?: string;
+}
+
+let latestDatabaseDiagnostics: DatabaseDiagnostics | null = null;
+
+export function getLatestDatabaseDiagnostics(): DatabaseDiagnostics | null {
+  return latestDatabaseDiagnostics;
+}
+
+export function setLatestDatabaseDiagnostics(diag: DatabaseDiagnostics | null): void {
+  latestDatabaseDiagnostics = diag;
+}
+
 export interface SupabaseFetchDetailedResult<T> {
   success: boolean;
   data: T | null;
@@ -432,6 +482,12 @@ export interface SupabaseFetchDetailedResult<T> {
     status?: number;
     details?: string;
     hint?: string;
+    requestedUrl?: string;
+    httpStatus?: number;
+    httpStatusText?: string;
+    responseSnippet?: string;
+    sdkError?: string;
+    timestamp?: string;
   } | null;
 }
 
@@ -439,88 +495,230 @@ export interface SupabaseFetchDetailedResult<T> {
  * Fetch all registered accounts with full status, error codes, and details.
  * Features dual-strategy: First queries via Supabase client SDK; if that encounters
  * any error or timeout, falls back directly to browser native REST fetch.
+ * Fully captures requested URL, HTTP status code, raw response body snippet, and SDK errors.
  */
 export async function fetchAccountsDetailedFromSupabase(): Promise<SupabaseFetchDetailedResult<AuthUser[]>> {
   const { url, anonKey } = getSupabaseConfig();
   const supabase = getSupabaseClient();
+  let sdkErrorMessage: string | null = null;
 
+  // 1. First Attempt: Supabase Client SDK with 5-second timeout safeguard
   if (supabase) {
     try {
-      const { data, error, status, statusText } = await supabase
+      const sdkQuery = supabase
         .from('staff_accounts')
         .select('*')
         .order('created_at', { ascending: false });
 
+      const sdkTimeout = new Promise<any>((_, reject) =>
+        setTimeout(() => reject(new Error('SDK query timed out after 5 seconds')), 5000)
+      );
+
+      const result = await Promise.race([sdkQuery, sdkTimeout]);
+      const { data, error, status, statusText } = result;
+
       if (!error && Array.isArray(data)) {
         const mapped = ((data as SupabaseRowAccount[]) || []).map(mapRowToAuthUser);
+        setLatestDatabaseDiagnostics(null);
         return {
           success: true,
           data: mapped,
           error: null,
         };
       } else {
-        console.warn('[Supabase SDK staff_accounts query returned error, falling back to direct REST]:', { status, statusText, error });
+        const detailStr = error?.details ? ` (Details: ${error.details})` : '';
+        const hintStr = error?.hint ? ` (Hint: ${error.hint})` : '';
+        const codeStr = error?.code ? ` [Code: ${error.code}]` : '';
+        sdkErrorMessage = error
+          ? `SDK returned HTTP ${status || '?'}${codeStr}: ${error.message || statusText || 'SDK query error'}${detailStr}${hintStr}`
+          : `SDK returned status ${status || '?'} with no data`;
+        console.warn('[Supabase SDK staff_accounts query returned error, falling back to direct REST]:', sdkErrorMessage);
       }
     } catch (sdkErr: any) {
-      console.warn('[Supabase SDK exception, falling back to direct REST]:', sdkErr);
+      sdkErrorMessage = `SDK Exception: ${sdkErr?.name || 'Error'}: ${sdkErr?.message || String(sdkErr)}`;
+      console.warn('[Supabase SDK exception, falling back to direct REST]:', sdkErrorMessage);
     }
+  } else {
+    sdkErrorMessage = 'Supabase client instance not initialized';
   }
 
-  // 2. Resilient Direct REST fetch fallback (bypasses SDK channel state & WebSockets)
+  // 2. Direct REST fetch fallback (bypasses SDK channel state & WebSockets)
   if (url && anonKey) {
+    const cleanUrl = sanitizeSupabaseUrl(url).trim().replace(/[\r\n\t]/g, '');
+    const cleanKey = anonKey.trim().replace(/[\r\n\t]/g, '');
+    // Full requested URL with domain and path
+    const restEndpoint = `${cleanUrl}/rest/v1/staff_accounts?select=%2A&order=created_at.desc`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+
     try {
-      const restEndpoint = `${sanitizeSupabaseUrl(url)}/rest/v1/staff_accounts?select=*&order=created_at.desc`;
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      const headers: Record<string, string> = {
+        apikey: cleanKey,
+        Authorization: `Bearer ${cleanKey}`,
+        Accept: 'application/json',
+      };
 
       const res = await fetch(restEndpoint, {
-        headers: {
-          apikey: anonKey,
-          Authorization: `Bearer ${anonKey}`,
-          Accept: 'application/json',
-        },
+        headers,
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
 
-      if (res.ok) {
-        const rows = await res.json();
-        if (Array.isArray(rows)) {
+      const httpStatus = res.status;
+      const httpStatusText = res.statusText || (res.ok ? 'OK' : 'Error');
+
+      // Read response as text first so we capture raw body snippet if not valid JSON
+      const rawText = await res.text().catch((readErr) => `[Failed reading response body: ${readErr?.message}]`);
+      const responseSnippet = rawText ? rawText.slice(0, 300) : '(empty body)';
+
+      if (res.ok && rawText) {
+        let rows: any = null;
+        let jsonParseFailed = false;
+        let jsonParseErrorMsg = '';
+
+        try {
+          rows = JSON.parse(rawText);
+        } catch (parseErr: any) {
+          jsonParseFailed = true;
+          jsonParseErrorMsg = parseErr?.message || 'Invalid JSON syntax';
+        }
+
+        if (!jsonParseFailed && Array.isArray(rows)) {
           const mapped = (rows as SupabaseRowAccount[]).map(mapRowToAuthUser);
+          setLatestDatabaseDiagnostics(null);
           return {
             success: true,
             data: mapped,
             error: null,
           };
         }
-      } else {
-        const errText = await res.text().catch(() => '');
-        console.warn('[Direct REST fetch failed]:', res.status, errText);
-        return {
-          success: false,
-          data: null,
-          error: {
-            message: `Database responded with status ${res.status}: ${res.statusText || 'Unable to load accounts'}`,
-            code: String(res.status),
-            status: res.status,
-          },
-        };
+
+        // Response returned HTTP 200 OK, but was NOT valid JSON (e.g., HTML page, captive portal, proxy)
+        if (jsonParseFailed) {
+          const diag: DatabaseDiagnostics = {
+            timestamp: new Date().toLocaleTimeString(),
+            requestedUrl: restEndpoint,
+            httpStatus,
+            httpStatusText,
+            responseSnippet,
+            sdkError: sdkErrorMessage || undefined,
+            clientUrlConfig: cleanUrl,
+            clientKeyPrefix: cleanKey ? cleanKey.slice(0, 8) + '...' : '(none)',
+            errorType: 'INVALID_JSON_RESPONSE',
+            rawErrorMessage: `Server returned HTTP ${httpStatus} (${httpStatusText}) with non-JSON response (${jsonParseErrorMsg})`,
+          };
+          setLatestDatabaseDiagnostics(diag);
+          return {
+            success: false,
+            data: null,
+            error: {
+              message: `Unexpected non-JSON response from server (HTTP ${httpStatus}): ${jsonParseErrorMsg}`,
+              code: 'INVALID_JSON_RESPONSE',
+              status: httpStatus,
+              requestedUrl: restEndpoint,
+              httpStatus,
+              httpStatusText,
+              responseSnippet,
+              sdkError: sdkErrorMessage || undefined,
+              timestamp: diag.timestamp,
+            },
+          };
+        }
       }
-    } catch (directErr: any) {
-      console.warn('[Direct REST exception]:', directErr);
+
+      // Non-OK HTTP status (e.g. 401, 403, 404, 500, 502)
+      const errMessage = res.status 
+        ? `Database server responded with status ${res.status}: ${httpStatusText}`
+        : 'Could not reach church database.';
+      
+      const diag: DatabaseDiagnostics = {
+        timestamp: new Date().toLocaleTimeString(),
+        requestedUrl: restEndpoint,
+        httpStatus,
+        httpStatusText,
+        responseSnippet,
+        sdkError: sdkErrorMessage || undefined,
+        clientUrlConfig: cleanUrl,
+        clientKeyPrefix: cleanKey ? cleanKey.slice(0, 8) + '...' : '(none)',
+        errorType: `HTTP_${res.status}`,
+        rawErrorMessage: errMessage,
+      };
+      setLatestDatabaseDiagnostics(diag);
+
       return {
         success: false,
         data: null,
         error: {
-          message: directErr?.name === 'AbortError' 
-            ? 'Connection timed out. Check your internet connection.' 
-            : (directErr?.message || 'Network connection failed (offline or unreachable).'),
-          code: 'NETWORK_DISCONNECTED',
+          message: errMessage,
+          code: String(res.status || 'UNREACHABLE'),
+          status: res.status || 0,
+          requestedUrl: restEndpoint,
+          httpStatus,
+          httpStatusText,
+          responseSnippet,
+          sdkError: sdkErrorMessage || undefined,
+          timestamp: diag.timestamp,
+        },
+      };
+    } catch (directErr: any) {
+      clearTimeout(timeoutId);
+      console.warn('[Direct REST exception]:', directErr);
+      const isTimeout = directErr?.name === 'AbortError';
+      const rawMsg = String(directErr?.message || '');
+      let friendlyMessage = 'Unable to connect to church database. Check your internet connection.';
+      if (isTimeout) {
+        friendlyMessage = 'Connection timed out (8s limit exceeded).';
+      } else if (rawMsg.includes('pattern') || rawMsg.includes('SyntaxError') || rawMsg.includes('Load failed') || rawMsg.includes('NetworkError')) {
+        friendlyMessage = `Network fetch error: ${rawMsg}`;
+      } else if (rawMsg) {
+        friendlyMessage = rawMsg;
+      }
+
+      const diag: DatabaseDiagnostics = {
+        timestamp: new Date().toLocaleTimeString(),
+        requestedUrl: restEndpoint,
+        httpStatus: 0,
+        httpStatusText: isTimeout ? 'Client Timeout (8s)' : 'Fetch Exception',
+        responseSnippet: isTimeout ? '[Request timed out before response received]' : `[Client Exception: ${directErr?.name || 'Error'}: ${rawMsg}]`,
+        sdkError: sdkErrorMessage || undefined,
+        clientUrlConfig: cleanUrl,
+        clientKeyPrefix: cleanKey ? cleanKey.slice(0, 8) + '...' : '(none)',
+        errorType: isTimeout ? 'TIMEOUT' : 'FETCH_EXCEPTION',
+        rawErrorMessage: rawMsg,
+      };
+      setLatestDatabaseDiagnostics(diag);
+
+      return {
+        success: false,
+        data: null,
+        error: {
+          message: friendlyMessage,
+          code: isTimeout ? 'TIMEOUT' : 'NETWORK_DISCONNECTED',
           status: 0,
+          requestedUrl: restEndpoint,
+          httpStatus: 0,
+          httpStatusText: isTimeout ? 'Client Timeout' : 'Exception',
+          responseSnippet: diag.responseSnippet,
+          sdkError: sdkErrorMessage || undefined,
+          timestamp: diag.timestamp,
         },
       };
     }
   }
+
+  const unconfigDiag: DatabaseDiagnostics = {
+    timestamp: new Date().toLocaleTimeString(),
+    requestedUrl: '(not configured)',
+    httpStatus: 0,
+    httpStatusText: 'Unconfigured',
+    responseSnippet: '(Credentials missing)',
+    sdkError: sdkErrorMessage || 'Credentials missing',
+    clientUrlConfig: url || '(none)',
+    clientKeyPrefix: '(none)',
+    errorType: 'MISSING_CONFIG',
+    rawErrorMessage: 'Church database credentials are not configured.',
+  };
+  setLatestDatabaseDiagnostics(unconfigDiag);
 
   return {
     success: false,
@@ -529,6 +727,12 @@ export async function fetchAccountsDetailedFromSupabase(): Promise<SupabaseFetch
       message: 'Church database credentials are not configured.',
       code: 'CLIENT_UNAVAILABLE',
       status: 0,
+      requestedUrl: '(not configured)',
+      httpStatus: 0,
+      httpStatusText: 'Unconfigured',
+      responseSnippet: '(Credentials missing)',
+      sdkError: sdkErrorMessage || undefined,
+      timestamp: unconfigDiag.timestamp,
     },
   };
 }
@@ -842,6 +1046,34 @@ export function subscribeToSupabaseAccounts(
 // DEFAULT PRE-CONFIGURED USERS & ROLES TABLE (SOUTH AFRICA CONTEXT)
 // -------------------------------------------------------------
 export const PRECONFIGURED_USERS: AuthUser[] = [
+  {
+    id: 'usr_1788782448517_xc8v',
+    email: 'nonyaneamo@gmail.com',
+    name: 'Amo Nhlabathi',
+    role: 'director',
+    roleTitle: 'Ministry Director (Overall Oversight)',
+    assignedClassId: 'all',
+    avatarColor: 'from-blue-500 to-cyan-600',
+    phone: '+27 83 661 0607',
+    whatsapp: '27836610607',
+    pin: '2504',
+    isClassAdmin: false,
+    isAuthenticated: true,
+  },
+  {
+    id: 'usr_1788890074023_rbnv',
+    email: '2898923@students.wits.ac.za',
+    name: 'DJ Cupcake',
+    role: 'tech',
+    roleTitle: 'Ministry Director / Tech Lead',
+    assignedClassId: 'tb',
+    avatarColor: 'from-blue-500 to-cyan-600',
+    phone: '+27 83 661 0607',
+    whatsapp: '27836610607',
+    pin: '2504',
+    isClassAdmin: true,
+    isAuthenticated: true,
+  },
   {
     id: 'usr-director',
     email: 'director@crc.church',

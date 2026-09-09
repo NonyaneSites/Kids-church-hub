@@ -87,13 +87,12 @@ export async function syncToIndexedDB(accounts: AuthUser[]): Promise<void> {
  */
 export function dbGetAccounts(): AuthUser[] {
   try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_ACCOUNTS_KEY);
-
     let accounts: AuthUser[] = [];
+    const raw = localStorage.getItem(LOCAL_STORAGE_ACCOUNTS_KEY);
 
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
+      if (Array.isArray(parsed) && parsed.length > 0) {
         accounts = parsed;
       }
     }
@@ -257,7 +256,19 @@ export interface DbSyncResult {
   synced: boolean;
   accounts: AuthUser[];
   source: 'supabase' | 'local';
-  error: { message: string; code?: string; status?: number; details?: string } | null;
+  error: {
+    message: string;
+    code?: string;
+    status?: number;
+    details?: string;
+    hint?: string;
+    requestedUrl?: string;
+    httpStatus?: number;
+    httpStatusText?: string;
+    responseSnippet?: string;
+    sdkError?: string;
+    timestamp?: string;
+  } | null;
   isEmptyConfirmed: boolean;
 }
 
@@ -291,10 +302,10 @@ export async function dbSyncWithSupabase(): Promise<DbSyncResult> {
       };
     }
 
-    // Supabase query failed (network, RLS, timeout, etc.)
-    // Do NOT overwrite local cache; return the real error object
+    // Supabase query failed (network, RLS, timeout, non-JSON response, etc.)
+    // Return existing local cache and surface the detailed diagnostic error
     const localAccounts = dbGetAccounts();
-    console.warn('[dbSyncWithSupabase] Cloud sync unsuccessful. Error:', detailed.error);
+    console.warn('[dbSyncWithSupabase] Cloud sync unsuccessful. Detailed error:', detailed.error);
     return {
       synced: false,
       accounts: localAccounts,
@@ -305,11 +316,18 @@ export async function dbSyncWithSupabase(): Promise<DbSyncResult> {
   } catch (e: any) {
     console.warn('[dbSyncWithSupabase] Exception during sync:', e);
     const localAccounts = dbGetAccounts();
+    const rawMsg = String(e?.message || '');
     return {
       synced: false,
       accounts: localAccounts,
       source: 'local',
-      error: { message: e?.message || 'Network connection failed' },
+      error: {
+        message: rawMsg || 'Network connection failed',
+        code: 'EXCEPTION',
+        status: 0,
+        responseSnippet: `[dbSync Exception: ${rawMsg}]`,
+        timestamp: new Date().toLocaleTimeString(),
+      },
       isEmptyConfirmed: false,
     };
   }

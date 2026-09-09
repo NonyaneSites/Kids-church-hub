@@ -49,6 +49,8 @@ import {
   subscribeToSupabaseAccounts,
   subscribeToSupabaseHubBroadcast,
   sendSupabaseHubBroadcast,
+  getLatestDatabaseDiagnostics,
+  DatabaseDiagnostics,
 } from '../lib/supabase';
 import { dbSyncRemoteAccounts } from '../lib/database';
 import { CLASSES_CONFIG, getAllDefaultClassHubs } from '../data/classHubsData';
@@ -117,6 +119,7 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
   const [registeredAccounts, setRegisteredAccounts] = useState<AuthUser[]>(() => getStoredAccountsList());
   const [isSyncingAccounts, setIsSyncingAccounts] = useState<boolean>(true);
   const [accountsSyncError, setAccountsSyncError] = useState<string | null>(null);
+  const [accountsSyncDiagnostics, setAccountsSyncDiagnostics] = useState<DatabaseDiagnostics | null>(null);
   const [accountsFetchAttempted, setAccountsFetchAttempted] = useState<boolean>(false);
 
   // Multi-Class Hubs Master State
@@ -1130,10 +1133,21 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
         if (res.synced) {
           setRegisteredAccounts(res.accounts);
           setAccountsSyncError(null);
+          setAccountsSyncDiagnostics(null);
         } else {
-          // Fetch failed (network drop, offline, etc.)
+          // Fetch failed (network drop, offline, non-JSON response, etc.)
           const errorMsg = res.error?.message || 'Could not connect to church database. Check internet connection.';
           setAccountsSyncError(errorMsg);
+          const diag = getLatestDatabaseDiagnostics() || (res.error ? {
+            timestamp: res.error.timestamp || new Date().toLocaleTimeString(),
+            requestedUrl: res.error.requestedUrl || '',
+            httpStatus: res.error.httpStatus || 0,
+            httpStatusText: res.error.httpStatusText || '',
+            responseSnippet: res.error.responseSnippet || '',
+            sdkError: res.error.sdkError,
+            rawErrorMessage: res.error.message,
+          } : null);
+          setAccountsSyncDiagnostics(diag);
           if (res.accounts && res.accounts.length > 0) {
             setRegisteredAccounts(res.accounts);
           }
@@ -1144,7 +1158,16 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
         if (isMounted) {
           setIsSyncingAccounts(false);
           setAccountsFetchAttempted(true);
-          setAccountsSyncError(err?.message || 'Network connection failed. Tap to retry.');
+          const rawMsg = err?.message || 'Network connection failed. Tap to retry.';
+          setAccountsSyncError(rawMsg);
+          setAccountsSyncDiagnostics(getLatestDatabaseDiagnostics() || {
+            timestamp: new Date().toLocaleTimeString(),
+            requestedUrl: '',
+            httpStatus: 0,
+            httpStatusText: 'Error',
+            responseSnippet: `[Exception: ${rawMsg}]`,
+            rawErrorMessage: rawMsg,
+          });
         }
       });
 
@@ -1154,6 +1177,7 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
         const merged = dbSyncRemoteAccounts(updatedAccounts);
         setRegisteredAccounts(merged);
         setAccountsSyncError(null);
+        setAccountsSyncDiagnostics(null);
       }
     });
 
@@ -1171,9 +1195,20 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
       if (res.synced) {
         setRegisteredAccounts(res.accounts);
         setAccountsSyncError(null);
+        setAccountsSyncDiagnostics(null);
       } else {
         const errorMsg = res.error?.message || 'Could not connect to church database. Tap to retry.';
         setAccountsSyncError(errorMsg);
+        const diag = getLatestDatabaseDiagnostics() || (res.error ? {
+          timestamp: res.error.timestamp || new Date().toLocaleTimeString(),
+          requestedUrl: res.error.requestedUrl || '',
+          httpStatus: res.error.httpStatus || 0,
+          httpStatusText: res.error.httpStatusText || '',
+          responseSnippet: res.error.responseSnippet || '',
+          sdkError: res.error.sdkError,
+          rawErrorMessage: res.error.message,
+        } : null);
+        setAccountsSyncDiagnostics(diag);
         if (res.accounts && res.accounts.length > 0) {
           setRegisteredAccounts(res.accounts);
         }
@@ -1183,6 +1218,14 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
       console.warn('Cloud sync error:', e);
       const msg = e?.message || 'Network connection failed';
       setAccountsSyncError(msg);
+      setAccountsSyncDiagnostics(getLatestDatabaseDiagnostics() || {
+        timestamp: new Date().toLocaleTimeString(),
+        requestedUrl: '',
+        httpStatus: 0,
+        httpStatusText: 'Error',
+        responseSnippet: `[Exception: ${msg}]`,
+        rawErrorMessage: msg,
+      });
       return { synced: false, accounts: registeredAccounts, source: 'local' as const, error: { message: msg }, isEmptyConfirmed: false };
     } finally {
       setIsSyncingAccounts(false);
@@ -1847,6 +1890,7 @@ export function useServiceSync(activeRoleProp: Role = 'admin') {
     registeredAccounts,
     isSyncingAccounts,
     accountsSyncError,
+    accountsSyncDiagnostics,
     accountsFetchAttempted,
     addNewAccount,
     deleteUserAccount,

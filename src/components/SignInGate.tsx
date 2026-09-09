@@ -20,6 +20,8 @@ import {
   Crown,
   ChevronLeft,
   Copy,
+  Check,
+  Terminal,
   Eye,
   EyeOff,
   RefreshCw,
@@ -28,6 +30,7 @@ import {
 import { AuthUser, Role, ClassId } from '../types/hub';
 import { CLASSES_CONFIG } from '../data/classHubsData';
 import { CrcLogo } from './CrcLogo';
+import { DatabaseDiagnostics, getLatestDatabaseDiagnostics } from '../lib/supabase';
 
 interface SignInGateProps {
   onSignIn: (user: AuthUser) => void;
@@ -35,6 +38,7 @@ interface SignInGateProps {
   onAddNewAccount?: (newUser: AuthUser) => void;
   isSyncing?: boolean;
   syncError?: string | null;
+  syncDiagnostics?: DatabaseDiagnostics | null;
   onRefreshAccounts?: () => void;
   fetchAttempted?: boolean;
 }
@@ -45,6 +49,7 @@ export const SignInGate: React.FC<SignInGateProps> = ({
   onAddNewAccount,
   isSyncing = false,
   syncError = null,
+  syncDiagnostics = null,
   onRefreshAccounts,
   fetchAttempted = false,
 }) => {
@@ -78,6 +83,45 @@ export const SignInGate: React.FC<SignInGateProps> = ({
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [isRetrying, setIsRetrying] = useState(false);
+  const [isCopiedDiagnostics, setIsCopiedDiagnostics] = useState(false);
+  const [showOfflineDiagnostics, setShowOfflineDiagnostics] = useState(false);
+
+  const activeDiagnostics = syncDiagnostics || getLatestDatabaseDiagnostics();
+
+  const handleCopyDiagnostics = () => {
+    const diag = activeDiagnostics;
+    const text = [
+      '=== CHURCH DATABASE CONNECTION DIAGNOSTICS ===',
+      `Timestamp: ${diag?.timestamp || new Date().toLocaleTimeString()}`,
+      `Requested URL: ${diag?.requestedUrl || 'N/A'}`,
+      `HTTP Status: ${diag?.httpStatus !== undefined && diag?.httpStatus !== 0 ? `${diag.httpStatus} ${diag.httpStatusText || ''}` : '0 (Network Drop / Exception)'}`,
+      `Error Type: ${diag?.errorType || 'N/A'}`,
+      `SDK Attempt: ${diag?.sdkError || 'None / Not triggered'}`,
+      `Error Message: ${diag?.rawErrorMessage || syncError || 'N/A'}`,
+      '--- Raw Response Body Snippet (First 300 Chars) ---',
+      diag?.responseSnippet || '(empty or none)',
+      '================================================='
+    ].join('\n');
+
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = text;
+        textArea.style.position = 'fixed';
+        textArea.style.opacity = '0';
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+      }
+      setIsCopiedDiagnostics(true);
+      setTimeout(() => setIsCopiedDiagnostics(false), 2500);
+    } catch (err) {
+      console.warn('Clipboard write error:', err);
+    }
+  };
 
   const handleManualRetry = async () => {
     setIsRetrying(true);
@@ -619,25 +663,93 @@ export const SignInGate: React.FC<SignInGateProps> = ({
                 
                 {/* Offline Warning Banner if accounts are cached but remote fetch encountered an error */}
                 {syncError && registeredAccounts.length > 0 && (
-                  <div className="p-2.5 bg-amber-500/15 border border-amber-500/30 rounded-xl text-xs text-amber-200 flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 overflow-hidden">
-                      <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
-                      <span className="text-[11px] truncate">Offline Cache Active • {syncError}</span>
+                  <div className="space-y-2">
+                    <div className="p-2.5 bg-amber-500/15 border border-amber-500/30 rounded-xl text-xs text-amber-200 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 overflow-hidden flex-1">
+                        <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                        <span className="text-[11px] truncate">Offline Cache Active • {syncError}</span>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setShowOfflineDiagnostics((prev) => !prev)}
+                          className="text-[11px] font-bold text-amber-300 hover:text-white underline cursor-pointer"
+                        >
+                          {showOfflineDiagnostics ? 'Hide Diagnostics' : 'View Diagnostics'}
+                        </button>
+                        {onRefreshAccounts && (
+                          <button
+                            type="button"
+                            onClick={onRefreshAccounts}
+                            disabled={isSyncing}
+                            className="text-[11px] font-bold text-purple-300 hover:text-white underline cursor-pointer"
+                          >
+                            Retry
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    {onRefreshAccounts && (
-                      <button
-                        type="button"
-                        onClick={onRefreshAccounts}
-                        disabled={isSyncing}
-                        className="text-[11px] font-bold text-amber-300 hover:text-white underline shrink-0 cursor-pointer"
-                      >
-                        Retry
-                      </button>
+
+                    {showOfflineDiagnostics && (
+                      <div className="bg-black/80 rounded-xl border border-amber-500/40 p-3 space-y-2.5 text-[11px] font-mono select-text">
+                        <div className="flex items-center justify-between pb-1.5 border-b border-white/10">
+                          <span className="text-[10px] font-sans font-bold uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
+                            <Terminal className="w-3.5 h-3.5 text-amber-400" />
+                            Database Diagnostics (Cached Session)
+                          </span>
+                          <button
+                            type="button"
+                            onClick={handleCopyDiagnostics}
+                            className="flex items-center gap-1 px-2.5 py-1 bg-white/10 hover:bg-white/20 active:scale-95 text-xs text-white rounded-md transition-colors cursor-pointer"
+                            title="Copy diagnostics to clipboard"
+                          >
+                            {isCopiedDiagnostics ? (
+                              <>
+                                <Check className="w-3 h-3 text-emerald-400" />
+                                <span className="text-[10px] font-sans text-emerald-400 font-bold">Copied!</span>
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="w-3 h-3 text-gray-300" />
+                                <span className="text-[10px] font-sans text-gray-200 font-semibold">Copy Info</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                        <div className="space-y-0.5">
+                          <div className="text-[10px] text-gray-400 font-sans font-semibold">Requested Endpoint URL:</div>
+                          <div className="p-1.5 bg-black/60 rounded border border-white/5 text-purple-300 text-[10px] break-all select-all font-mono">
+                            {activeDiagnostics?.requestedUrl || '(not recorded)'}
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <div>
+                            <div className="text-[10px] text-gray-400 font-sans font-semibold">HTTP Status:</div>
+                            <div className="p-1.5 bg-black/60 rounded border border-white/5 text-amber-300 font-bold text-[10px] select-all">
+                              {activeDiagnostics?.httpStatus !== undefined && activeDiagnostics.httpStatus !== 0
+                                ? `${activeDiagnostics.httpStatus} ${activeDiagnostics.httpStatusText || ''}`
+                                : '0 (Network Exception)'}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-[10px] text-gray-400 font-sans font-semibold">SDK Attempt:</div>
+                            <div className="p-1.5 bg-black/60 rounded border border-white/5 text-gray-300 text-[10px] truncate select-all" title={activeDiagnostics?.sdkError || 'None'}>
+                              {activeDiagnostics?.sdkError || 'None'}
+                            </div>
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-[10px] text-gray-400 font-sans font-semibold">Raw Response Body (First 250 chars):</div>
+                          <pre className="p-2 bg-black/90 rounded border border-white/10 text-[10px] text-gray-200 whitespace-pre-wrap break-all max-h-24 overflow-y-auto select-all font-mono">
+                            {activeDiagnostics?.responseSnippet || '(empty body)'}
+                          </pre>
+                        </div>
+                      </div>
                     )}
                   </div>
                 )}
 
-                <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
+                <div className="space-y-2 max-h-[340px] overflow-y-auto pr-1">
                   {isSyncing && registeredAccounts.length === 0 ? (
                     <div className="text-center py-10 px-4 bg-white/5 rounded-2xl border border-white/5 space-y-3">
                       <RefreshCw className="w-6 h-6 text-purple-400 animate-spin mx-auto" />
@@ -645,13 +757,89 @@ export const SignInGate: React.FC<SignInGateProps> = ({
                       <div className="text-[11px] text-gray-400">Loading verified staff accounts from Supabase cloud</div>
                     </div>
                   ) : syncError && registeredAccounts.length === 0 ? (
-                    <div className="text-center py-7 px-4 bg-red-950/25 rounded-2xl border border-red-500/30 space-y-3">
-                      <AlertCircle className="w-8 h-8 text-red-400 mx-auto" />
-                      <div className="text-xs font-bold text-white">Could Not Connect to Church Database</div>
-                      <p className="text-[11px] text-red-300/90 max-w-sm mx-auto leading-relaxed">
-                        {syncError}
-                      </p>
-                      <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                    <div className="text-left p-4 sm:p-5 bg-red-950/40 rounded-2xl border border-red-500/40 space-y-3.5 shadow-2xl">
+                      {/* Heading */}
+                      <div className="flex items-start gap-3">
+                        <div className="p-2 bg-red-500/20 rounded-xl border border-red-500/30 shrink-0 text-red-400">
+                          <AlertCircle className="w-5 h-5" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs sm:text-sm font-bold text-white tracking-wide">
+                            Could Not Connect to Church Database
+                          </div>
+                          <p className="text-[11px] sm:text-xs text-red-200/90 mt-0.5 leading-relaxed break-words font-medium">
+                            {syncError}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Diagnostic Telemetry Panel */}
+                      <div className="bg-black/70 rounded-xl border border-red-500/30 p-3 space-y-2.5 text-[11px] font-mono select-text">
+                        <div className="flex items-center justify-between pb-1.5 border-b border-white/10">
+                          <span className="text-[10px] font-sans font-bold uppercase tracking-wider text-red-300/90 flex items-center gap-1.5">
+                            <Terminal className="w-3.5 h-3.5 text-red-400" />
+                            Connection Diagnostics
+                          </span>
+                          <button
+                            type="button"
+                            onClick={handleCopyDiagnostics}
+                            className="flex items-center gap-1 px-2.5 py-1 bg-white/10 hover:bg-white/20 active:scale-95 text-xs text-white rounded-md transition-colors cursor-pointer"
+                            title="Copy diagnostics to clipboard"
+                          >
+                            {isCopiedDiagnostics ? (
+                              <>
+                                <Check className="w-3 h-3 text-emerald-400" />
+                                <span className="text-[10px] font-sans text-emerald-400 font-bold">Copied!</span>
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="w-3 h-3 text-gray-300" />
+                                <span className="text-[10px] font-sans text-gray-200 font-semibold">Copy Diagnostics</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+
+                        {/* Exact requested URL */}
+                        <div className="space-y-0.5">
+                          <div className="text-[10px] text-gray-400 font-sans font-semibold">Exact Target URL:</div>
+                          <div className="p-1.5 bg-black/60 rounded border border-white/5 text-purple-300 text-[10px] sm:text-[11px] break-all leading-tight select-all font-mono">
+                            {activeDiagnostics?.requestedUrl || '(unreachable or missing)'}
+                          </div>
+                        </div>
+
+                        {/* HTTP Status Code & SDK Query */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <div className="space-y-0.5">
+                            <div className="text-[10px] text-gray-400 font-sans font-semibold">HTTP Status Code:</div>
+                            <div className="p-1.5 bg-black/60 rounded border border-white/5 text-[11px] font-bold text-amber-300 select-all font-mono">
+                              {activeDiagnostics?.httpStatus !== undefined && activeDiagnostics.httpStatus !== 0
+                                ? `${activeDiagnostics.httpStatus} ${activeDiagnostics.httpStatusText || ''}`
+                                : '0 (Network Drop / Exception)'}
+                            </div>
+                          </div>
+                          <div className="space-y-0.5">
+                            <div className="text-[10px] text-gray-400 font-sans font-semibold">SDK Attempt:</div>
+                            <div className="p-1.5 bg-black/60 rounded border border-white/5 text-[10px] text-gray-300 truncate select-all font-mono" title={activeDiagnostics?.sdkError || 'None'}>
+                              {activeDiagnostics?.sdkError || 'None / Not triggered'}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Raw response snippet */}
+                        <div className="space-y-0.5">
+                          <div className="text-[10px] text-gray-400 font-sans font-semibold flex items-center justify-between">
+                            <span>Raw Response Body Preview:</span>
+                            <span className="text-[9px] text-gray-500 font-normal">First 250 characters</span>
+                          </div>
+                          <pre className="p-2 bg-black/80 rounded border border-white/10 text-[10px] sm:text-[11px] text-gray-200 whitespace-pre-wrap break-all max-h-24 overflow-y-auto leading-relaxed select-all font-mono">
+                            {activeDiagnostics?.responseSnippet || '(No response received from server)'}
+                          </pre>
+                        </div>
+                      </div>
+
+                      {/* Action Buttons */}
+                      <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 pt-1">
                         {onRefreshAccounts && (
                           <button
                             type="button"
@@ -666,7 +854,7 @@ export const SignInGate: React.FC<SignInGateProps> = ({
                         <button
                           type="button"
                           onClick={handleHardReload}
-                          title="Purges any cached browser scripts and forces a fresh reload"
+                          title="Forces a fresh reload"
                           className="px-3.5 py-2.5 bg-white/10 hover:bg-white/20 active:scale-95 text-white font-medium text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer border border-white/10"
                         >
                           <RotateCw className="w-3.5 h-3.5" />
@@ -680,7 +868,7 @@ export const SignInGate: React.FC<SignInGateProps> = ({
                           Fast Pass
                         </button>
                       </div>
-                      <div className="text-[10px] text-gray-400 pt-1">
+                      <div className="text-[10px] text-gray-400 pt-0.5">
                         Target: <span className="font-mono text-purple-300">CRC Kids Supabase Cloud</span>
                       </div>
                     </div>
